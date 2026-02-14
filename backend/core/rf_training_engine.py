@@ -10,6 +10,7 @@ from sklearn.metrics import accuracy_score, confusion_matrix
 
 from core.rf_compiler import CompiledRFResult
 from core.rf_job_registry import rf_job_registry
+from core.job_storage import RF_ARTIFACT_FILENAME, update_job_metadata
 from datasets.rf_loader import load_rf_dataset, split_rf_dataset
 from models.rf_training_config import RFTrainingConfig
 
@@ -34,6 +35,8 @@ async def run_rf_training_job(
 
     try:
         rf_job_registry.set_status(job_id, "running")
+        if entry.job_dir is not None:
+            update_job_metadata(entry.job_dir, status="running", terminal=False)
         bundle = load_rf_dataset(training.dataset)
         train_x, test_x, train_y, test_y = split_rf_dataset(
             bundle,
@@ -49,6 +52,8 @@ async def run_rf_training_job(
             )
             await rf_job_registry.publish(job_id, {"type": "rf_error", "message": message})
             await rf_job_registry.mark_terminal(job_id, "failed", error=message)
+            if entry.job_dir is not None:
+                update_job_metadata(entry.job_dir, status="failed", terminal=True, error=message)
             return
 
         hyper = compiled.hyperparams
@@ -117,11 +122,22 @@ async def run_rf_training_job(
                 "stopped",
                 final_metrics={"final_train_accuracy": 0.0, "final_test_accuracy": 0.0},
             )
+            if entry.job_dir is not None:
+                update_job_metadata(
+                    entry.job_dir,
+                    status="stopped",
+                    terminal=True,
+                    final_metrics={"final_train_accuracy": 0.0, "final_test_accuracy": 0.0},
+                )
             return
 
-        artifact_dir = artifacts_dir / "rf"
-        artifact_dir.mkdir(parents=True, exist_ok=True)
-        artifact_path = artifact_dir / f"{job_id}.pkl"
+        if entry.job_dir is not None:
+            entry.job_dir.mkdir(parents=True, exist_ok=True)
+            artifact_path = entry.job_dir / RF_ARTIFACT_FILENAME
+        else:
+            artifact_dir = artifacts_dir / "rf"
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            artifact_path = artifact_dir / f"{job_id}.pkl"
 
         artifact_payload = {
             "model": classifier,
@@ -163,7 +179,20 @@ async def run_rf_training_job(
             },
             artifact_path=artifact_path,
         )
+        if entry.job_dir is not None:
+            update_job_metadata(
+                entry.job_dir,
+                status=final_status,
+                terminal=True,
+                final_metrics={
+                    "final_train_accuracy": final_train_accuracy,
+                    "final_test_accuracy": final_test_accuracy,
+                },
+                artifact_path=str(artifact_path),
+            )
     except Exception as exc:  # pragma: no cover
         message = str(exc)
         await rf_job_registry.publish(job_id, {"type": "rf_error", "message": message})
         await rf_job_registry.mark_terminal(job_id, "failed", error=message)
+        if entry.job_dir is not None:
+            update_job_metadata(entry.job_dir, status="failed", terminal=True, error=message)

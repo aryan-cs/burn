@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Viewport } from './canvas/Viewport'
 import { useConnectionDraw } from './hooks/useConnectionDraw'
 import { useWebSocket } from './hooks/useWebSocket'
-import { useGraphStore, type Edge, type LayerNode } from './store/graphStore'
+import { useGraphStore, type LayerNode } from './store/graphStore'
 import { useTrainingStore } from './store/trainingStore'
 import { serializeForBackend } from './utils/graphSerializer'
 import {
@@ -20,6 +20,8 @@ import { TrainTab } from './ui/tabs/TrainTab'
 
 const DEFAULT_LAYER_ROWS = 4
 const DEFAULT_LAYER_COLS = 6
+const DEFAULT_INPUT_SHAPE: [number, number, number] = [1, 28, 28]
+const DEFAULT_OUTPUT_CLASSES = 10
 const LAYER_SPACING = 4
 const ALIGN_LAYER_SPACING = 2.25
 const ALIGN_Y = 0.8
@@ -37,7 +39,15 @@ const ACTIVATION_OPTIONS = [
 
 interface ValidationResponse {
   valid: boolean
-  errors: Array<{ message?: string }>
+  errors: ValidationIssue[]
+  warnings: string[]
+}
+
+interface ValidationIssue {
+  message?: string
+  node_id?: string | null
+  expected?: unknown
+  got?: unknown
 }
 
 interface TrainResponse {
@@ -51,6 +61,7 @@ interface InferResponse {
 }
 
 type DashboardTab = 'validate' | 'train' | 'infer'
+type BuildStatus = 'idle' | 'success' | 'error'
 
 async function requestJson<T>(
   path: string,
@@ -102,6 +113,8 @@ function App() {
   const edges = useGraphStore((s) => s.edges)
   const selectedNodeId = useGraphStore((s) => s.selectedNodeId)
   const addNode = useGraphStore((s) => s.addNode)
+  const addEdge = useGraphStore((s) => s.addEdge)
+  const removeEdge = useGraphStore((s) => s.removeEdge)
   const updateNodeConfig = useGraphStore((s) => s.updateNodeConfig)
   const setNodesPosition = useGraphStore((s) => s.setNodesPosition)
   const setDraggingNodeId = useGraphStore((s) => s.setDraggingNodeId)
@@ -114,17 +127,36 @@ function App() {
   const selectedRole: LayerRole = selectedNode
     ? nodeRoles.get(selectedNode.id) ?? 'hidden'
     : 'hidden'
-  const selectedRows = toPositiveInt(selectedNode?.config.rows, DEFAULT_LAYER_ROWS)
-  const selectedCols = toPositiveInt(selectedNode?.config.cols, DEFAULT_LAYER_COLS)
+  const selectedInputShape = selectedNode?.type === 'Input'
+    ? toInputShapeOrDefault(selectedNode.config.shape)
+    : null
+  const selectedRows = selectedNode?.type === 'Input'
+    ? (selectedInputShape?.[1] ?? DEFAULT_INPUT_SHAPE[1])
+    : toPositiveInt(selectedNode?.config.rows, DEFAULT_LAYER_ROWS)
+  const selectedCols = selectedNode?.type === 'Input'
+    ? (selectedInputShape?.[2] ?? DEFAULT_INPUT_SHAPE[2])
+    : toPositiveInt(selectedNode?.config.cols, DEFAULT_LAYER_COLS)
+  const selectedChannels = selectedNode?.type === 'Input'
+    ? (selectedInputShape?.[0] ?? DEFAULT_INPUT_SHAPE[0])
+    : DEFAULT_INPUT_SHAPE[0]
+  const selectedUnits = selectedNode?.type === 'Dense'
+    ? toPositiveInt(nodeUnits(selectedNode), DEFAULT_LAYER_ROWS * DEFAULT_LAYER_COLS)
+    : DEFAULT_LAYER_ROWS * DEFAULT_LAYER_COLS
+  const selectedDropoutRate = selectedNode?.type === 'Dropout'
+    ? clampDropoutRate(selectedNode.config.rate)
+    : 0.5
+  const selectedOutputClasses = selectedNode?.type === 'Output'
+    ? toPositiveInt(selectedNode.config.num_classes, DEFAULT_OUTPUT_CLASSES)
+    : DEFAULT_OUTPUT_CLASSES
   const sharedNonOutputActivation = getSharedNonOutputActivation(
     nodes,
     nodeRoles,
     DEFAULT_ACTIVATION
   )
-  const selectedActivation =
-    selectedRole === 'output'
-      ? toStringOrFallback(selectedNode?.config.activation, DEFAULT_ACTIVATION)
-      : sharedNonOutputActivation
+  const selectedActivation = toStringOrFallback(
+    selectedNode?.config.activation,
+    DEFAULT_ACTIVATION
+  )
   const selectedCustomName = toStringOrFallback(selectedNode?.config.name, '')
   const selectedDisplayName = selectedNode
     ? getLayerDisplayName(selectedNode.id, selectedRole, selectedCustomName)
@@ -147,17 +179,18 @@ function App() {
           toStringOrFallback(node.config.name, '')
         ),
         role,
-        rows: toPositiveInt(node.config.rows, DEFAULT_LAYER_ROWS),
-        cols: toPositiveInt(node.config.cols, DEFAULT_LAYER_COLS),
+        sizeLabel: getLayerSizeLabel(node),
       },
     ]
   })
-  const weightCount = getWeightCount(nodes, edges)
-  const biasCount = getBiasCount(nodes, edges)
+  const stats = useMemo(
+    () => computeGraphStats(nodes, orderedNodeIds),
+    [nodes, orderedNodeIds]
+  )
+  const weightCount = stats.weightCount
+  const biasCount = stats.biasCount
   const layerTypeSummary = getLayerTypeSummary(nodes)
-  const neuronCount = Object.values(nodes).reduce((total, node) => {
-    return total + getLayerNeuronCount(node)
-  }, 0)
+  const neuronCount = stats.neuronCount
 
   const trainingStatus = useTrainingStore((s) => s.status)
   const trainingJobId = useTrainingStore((s) => s.jobId)
@@ -173,6 +206,9 @@ function App() {
   const [draftName, setDraftName] = useState('')
   const [activeTab, setActiveTab] = useState<DashboardTab>('validate')
   const [hasValidatedModel, setHasValidatedModel] = useState(false)
+  const [buildStatus, setBuildStatus] = useState<BuildStatus>('idle')
+  const [buildIssues, setBuildIssues] = useState<string[]>([])
+  const [buildWarnings, setBuildWarnings] = useState<string[]>([])
   const [backendBusyAction, setBackendBusyAction] = useState<string | null>(null)
   const [backendMessage, setBackendMessage] = useState('Ready to validate/train.')
   const [inferenceGrid, setInferenceGrid] = useState<number[][]>(() =>
@@ -221,6 +257,12 @@ function App() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       setBackendMessage(message)
+      if (actionName === 'validate') {
+        setBuildStatus('error')
+        setBuildWarnings([])
+        setBuildIssues([message])
+        setHasValidatedModel(false)
+      }
       if (actionName === 'train') {
         setTrainingError(message)
       }
@@ -243,19 +285,147 @@ function App() {
 
   useEffect(() => {
     setHasValidatedModel(false)
+    setBuildStatus('idle')
+    setBuildIssues([])
+    setBuildWarnings([])
   }, [layerCount, edgeCount])
 
   const handleAddLayer = () => {
-    const nodeCount = Object.keys(useGraphStore.getState().nodes).length
-    const position: [number, number, number] = [0, ALIGN_Y, -nodeCount * LAYER_SPACING]
-    const nodeId = addNode('Dense', position)
-
-    updateNodeConfig(nodeId, {
-      rows: DEFAULT_LAYER_ROWS,
-      cols: DEFAULT_LAYER_COLS,
-      units: DEFAULT_LAYER_ROWS * DEFAULT_LAYER_COLS,
-      activation: DEFAULT_ACTIVATION,
+    const state = useGraphStore.getState()
+    const nodeIds = Object.keys(state.nodes)
+    const nodeCount = nodeIds.length
+    const orderedNodeIds = getNeuralNetworkOrder(state.nodes, state.edges)
+    const outputCounts = new Map<string, number>()
+    Object.values(state.edges).forEach((edge) => {
+      outputCounts.set(edge.source, (outputCounts.get(edge.source) ?? 0) + 1)
     })
+
+    const inputNodeId = orderedNodeIds.find((nodeId) => state.nodes[nodeId]?.type === 'Input') ?? null
+    const flattenNodeId =
+      orderedNodeIds.find((nodeId) => state.nodes[nodeId]?.type === 'Flatten') ?? null
+    const outputNodeId = orderedNodeIds.find((nodeId) => state.nodes[nodeId]?.type === 'Output')
+    const edgeIntoOutput = outputNodeId
+      ? Object.values(state.edges).find((edge) => edge.target === outputNodeId)
+      : null
+    const tailNodeId =
+      [...orderedNodeIds]
+        .reverse()
+        .find((nodeId) => (outputCounts.get(nodeId) ?? 0) === 0) ?? null
+
+    const fallbackPosition: [number, number, number] = [0, ALIGN_Y, -nodeCount * LAYER_SPACING]
+
+    const positionAfterNode = (sourceId: string | null): [number, number, number] => {
+      if (!sourceId) return fallbackPosition
+      const sourcePosition = state.nodes[sourceId]?.position
+      if (!sourcePosition) return fallbackPosition
+      return [sourcePosition[0], sourcePosition[1], sourcePosition[2] - ALIGN_LAYER_SPACING]
+    }
+
+    const positionBetweenNodes = (
+      sourceId: string | null,
+      targetId: string | null
+    ): [number, number, number] => {
+      if (!sourceId || !targetId) return fallbackPosition
+      const sourcePosition = state.nodes[sourceId]?.position
+      const targetPosition = state.nodes[targetId]?.position
+      if (sourcePosition && targetPosition) {
+        return [
+          (sourcePosition[0] + targetPosition[0]) / 2,
+          (sourcePosition[1] + targetPosition[1]) / 2,
+          (sourcePosition[2] + targetPosition[2]) / 2,
+        ]
+      }
+      return fallbackPosition
+    }
+
+    const addDefaultDense = (position: [number, number, number]): string => {
+      const nodeId = addNode('Dense', position)
+      updateNodeConfig(nodeId, {
+        rows: DEFAULT_LAYER_ROWS,
+        cols: DEFAULT_LAYER_COLS,
+        units: DEFAULT_LAYER_ROWS * DEFAULT_LAYER_COLS,
+        activation: DEFAULT_ACTIVATION,
+      })
+      return nodeId
+    }
+
+    if (!inputNodeId) {
+      const nodeId = addNode('Input', [0, ALIGN_Y, 3.4])
+      selectNode(nodeId)
+      setHasValidatedModel(false)
+      return
+    }
+
+    if (!flattenNodeId) {
+      const anchorSource = edgeIntoOutput?.source ?? tailNodeId ?? inputNodeId
+      const nodeId = addNode(
+        'Flatten',
+        edgeIntoOutput
+          ? positionBetweenNodes(anchorSource, edgeIntoOutput.target)
+          : positionAfterNode(anchorSource)
+      )
+      if (edgeIntoOutput) {
+        removeEdge(edgeIntoOutput.id)
+        addEdge(anchorSource, nodeId)
+        addEdge(nodeId, edgeIntoOutput.target)
+      } else {
+        addEdge(anchorSource, nodeId)
+      }
+      selectNode(nodeId)
+      setHasValidatedModel(false)
+      return
+    }
+
+    const denseCount = orderedNodeIds.filter((nodeId) => state.nodes[nodeId]?.type === 'Dense').length
+    if (denseCount === 0) {
+      const anchorSource = edgeIntoOutput?.source ?? tailNodeId ?? flattenNodeId
+      const nodeId = addDefaultDense(
+        edgeIntoOutput
+          ? positionBetweenNodes(anchorSource, edgeIntoOutput.target)
+          : positionAfterNode(anchorSource)
+      )
+
+      if (edgeIntoOutput) {
+        removeEdge(edgeIntoOutput.id)
+        addEdge(anchorSource, nodeId)
+        addEdge(nodeId, edgeIntoOutput.target)
+      } else {
+        addEdge(anchorSource, nodeId)
+      }
+      selectNode(nodeId)
+      setHasValidatedModel(false)
+      return
+    }
+
+    if (!outputNodeId) {
+      const anchorSource = tailNodeId ?? orderedNodeIds[orderedNodeIds.length - 1] ?? null
+      const nodeId = addNode('Output', positionAfterNode(anchorSource))
+      if (anchorSource) {
+        addEdge(anchorSource, nodeId)
+      }
+      selectNode(nodeId)
+      setHasValidatedModel(false)
+      return
+    }
+
+    const insertSource = edgeIntoOutput?.source ?? tailNodeId
+    const nodeId = addDefaultDense(
+      edgeIntoOutput
+        ? positionBetweenNodes(insertSource, outputNodeId)
+        : positionAfterNode(insertSource)
+    )
+
+    if (outputNodeId && edgeIntoOutput) {
+      removeEdge(edgeIntoOutput.id)
+      addEdge(edgeIntoOutput.source, nodeId)
+      addEdge(nodeId, outputNodeId)
+    } else {
+      if (insertSource && insertSource !== outputNodeId) {
+        addEdge(insertSource, nodeId)
+      }
+      addEdge(nodeId, outputNodeId)
+    }
+
     selectNode(nodeId)
     setHasValidatedModel(false)
   }
@@ -281,9 +451,20 @@ function App() {
   }
 
   const handleRowsChange = (nextRowsValue: string) => {
-    if (!selectedNodeId) return
+    if (!selectedNodeId || !selectedNode) return
     const nextRows = Number(nextRowsValue)
     if (!Number.isInteger(nextRows) || nextRows <= 0) return
+
+    if (selectedNode.type === 'Input') {
+      const [channels, _height, width] = toInputShapeOrDefault(selectedNode.config.shape)
+      updateNodeConfig(selectedNodeId, {
+        shape: [channels, nextRows, width],
+      })
+      setHasValidatedModel(false)
+      return
+    }
+
+    if (selectedNode.type !== 'Dense') return
     updateNodeConfig(selectedNodeId, {
       rows: nextRows,
       units: nextRows * selectedCols,
@@ -292,9 +473,20 @@ function App() {
   }
 
   const handleColsChange = (nextColsValue: string) => {
-    if (!selectedNodeId) return
+    if (!selectedNodeId || !selectedNode) return
     const nextCols = Number(nextColsValue)
     if (!Number.isInteger(nextCols) || nextCols <= 0) return
+
+    if (selectedNode.type === 'Input') {
+      const [channels, height] = toInputShapeOrDefault(selectedNode.config.shape)
+      updateNodeConfig(selectedNodeId, {
+        shape: [channels, height, nextCols],
+      })
+      setHasValidatedModel(false)
+      return
+    }
+
+    if (selectedNode.type !== 'Dense') return
     updateNodeConfig(selectedNodeId, {
       cols: nextCols,
       units: selectedRows * nextCols,
@@ -303,20 +495,42 @@ function App() {
   }
 
   const handleActivationChange = (nextActivation: string) => {
-    if (!selectedNodeId) return
+    if (!selectedNodeId || !selectedNode) return
+    if (selectedNode.type !== 'Dense' && selectedNode.type !== 'Output') return
+    updateNodeConfig(selectedNodeId, { activation: nextActivation })
+    setHasValidatedModel(false)
+  }
 
-    if (selectedRole === 'output') {
-      updateNodeConfig(selectedNodeId, { activation: nextActivation })
-      setHasValidatedModel(false)
-      return
-    }
+  const handleChannelsChange = (nextValue: string) => {
+    if (!selectedNodeId || selectedNode?.type !== 'Input') return
+    const channels = Number(nextValue)
+    if (!Number.isInteger(channels) || channels <= 0) return
+    const [, height, width] = toInputShapeOrDefault(selectedNode.config.shape)
+    updateNodeConfig(selectedNodeId, { shape: [channels, height, width] })
+    setHasValidatedModel(false)
+  }
 
-    Object.keys(nodes).forEach((nodeId) => {
-      const role = nodeRoles.get(nodeId) ?? 'hidden'
-      if (role !== 'output') {
-        updateNodeConfig(nodeId, { activation: nextActivation })
-      }
-    })
+  const handleUnitsChange = (nextValue: string) => {
+    if (!selectedNodeId || selectedNode?.type !== 'Dense') return
+    const units = Number(nextValue)
+    if (!Number.isInteger(units) || units <= 0) return
+    const { rows, cols } = denseGridFromUnits(units)
+    updateNodeConfig(selectedNodeId, { units, rows, cols })
+    setHasValidatedModel(false)
+  }
+
+  const handleDropoutRateChange = (nextValue: string) => {
+    if (!selectedNodeId || selectedNode?.type !== 'Dropout') return
+    const rate = clampDropoutRate(nextValue)
+    updateNodeConfig(selectedNodeId, { rate })
+    setHasValidatedModel(false)
+  }
+
+  const handleOutputClassesChange = (nextValue: string) => {
+    if (!selectedNodeId || selectedNode?.type !== 'Output') return
+    const classes = Number(nextValue)
+    if (!Number.isInteger(classes) || classes <= 0) return
+    updateNodeConfig(selectedNodeId, { num_classes: classes })
     setHasValidatedModel(false)
   }
 
@@ -359,16 +573,31 @@ function App() {
         body: JSON.stringify(payload),
       })
 
+      setBuildWarnings(response.warnings ?? [])
       if (!response.valid) {
-        const firstError = response.errors[0]?.message ?? 'Graph validation failed.'
+        const issues =
+          response.errors.length > 0
+            ? response.errors.map((issue) => formatValidationIssue(issue))
+            : ['Graph validation failed.']
+        const firstError = issues[0] ?? 'Graph validation failed.'
+        setBuildStatus('error')
+        setBuildIssues(issues)
         setBackendMessage(firstError)
         setHasValidatedModel(false)
         return
       }
 
+      setBuildStatus('success')
+      setBuildIssues([])
       setHasValidatedModel(true)
       setActiveTab('train')
-      setBackendMessage(`Validation passed (${payload.nodes.length} backend nodes).`)
+      if (response.warnings.length > 0) {
+        setBackendMessage(
+          `Validation passed with ${response.warnings.length} warning(s).`
+        )
+      } else {
+        setBackendMessage(`Validation passed (${payload.nodes.length} backend nodes).`)
+      }
     })
 
   const handleTrainModel = () =>
@@ -492,12 +721,30 @@ function App() {
             <BuildTab
               layerItems={buildLayerItems}
               hasSelectedNode={selectedNode !== null}
+              selectedNodeId={selectedNodeId}
+              selectedNodeType={selectedNode?.type ?? null}
               isEditingName={isEditingName}
               draftName={draftName}
               selectedDisplayName={selectedDisplayName}
               selectedRows={selectedRows}
               selectedCols={selectedCols}
+              selectedChannels={selectedChannels}
+              selectedUnits={selectedUnits}
+              selectedDropoutRate={selectedDropoutRate}
+              selectedOutputClasses={selectedOutputClasses}
               selectedActivation={selectedActivation}
+              selectedShapeLabel={selectedNode ? getLayerSizeLabel(selectedNode) : '—'}
+              canEditSize={
+                selectedNode?.type === 'Dense' || selectedNode?.type === 'Input'
+              }
+              sizeFieldLabel={selectedNode?.type === 'Input' ? 'Image Size' : 'Size'}
+              canEditActivation={
+                selectedNode?.type === 'Dense' || selectedNode?.type === 'Output'
+              }
+              canEditChannels={selectedNode?.type === 'Input'}
+              canEditUnits={selectedNode?.type === 'Dense'}
+              canEditDropoutRate={selectedNode?.type === 'Dropout'}
+              canEditOutputClasses={selectedNode?.type === 'Output'}
               activationOptions={ACTIVATION_OPTIONS}
               layerCount={layerCount}
               neuronCount={neuronCount}
@@ -506,14 +753,23 @@ function App() {
               layerTypeSummary={layerTypeSummary}
               sharedNonOutputActivation={sharedNonOutputActivation}
               onAddLayer={handleAddLayer}
+              onSelectLayer={(nodeId) => selectNode(nodeId)}
               onBeginNameEdit={beginNameEdit}
               onDraftNameChange={(value) => setDraftName(value)}
               onNameCommit={commitNameEdit}
               onNameCancel={cancelNameEdit}
               onRowsChange={handleRowsChange}
               onColsChange={handleColsChange}
+              onChannelsChange={handleChannelsChange}
+              onUnitsChange={handleUnitsChange}
+              onDropoutRateChange={handleDropoutRateChange}
+              onOutputClassesChange={handleOutputClassesChange}
               onActivationChange={handleActivationChange}
               onValidate={handleValidateModel}
+              buildStatus={buildStatus}
+              buildStatusMessage={getBuildStatusMessage(buildStatus, buildIssues.length)}
+              buildIssues={buildIssues}
+              buildWarnings={buildWarnings}
               validateDisabled={isBackendBusy || layerCount === 0}
               validateLabel={backendBusyAction === 'validate' ? 'Building...' : 'Build'}
             />
@@ -620,10 +876,50 @@ function getTrainingStatusClass(status: string): string {
   return 'status-pill status-pill-idle'
 }
 
-function getLayerNeuronCount(node: LayerNode): number {
-  const rows = toPositiveInt(node.config.rows, DEFAULT_LAYER_ROWS)
-  const cols = toPositiveInt(node.config.cols, DEFAULT_LAYER_COLS)
-  return rows * cols
+function getBuildStatusMessage(status: BuildStatus, issueCount: number): string {
+  if (status === 'success') {
+    return 'Build passed. Graph is valid for backend compilation.'
+  }
+  if (status === 'error') {
+    return `Build failed (${issueCount} issue${issueCount === 1 ? '' : 's'}).`
+  }
+  return 'Run Build to validate topology, layer order, and shape compatibility.'
+}
+
+function formatValidationIssue(issue: ValidationIssue): string {
+  const baseParts: string[] = []
+  if (issue.node_id) {
+    baseParts.push(`[${issue.node_id}]`)
+  }
+  if (issue.message) {
+    baseParts.push(issue.message)
+  }
+
+  let message = baseParts.join(' ').trim()
+  if (message.length === 0) {
+    message = 'Graph validation failed.'
+  }
+
+  const expected = formatCompactValue(issue.expected)
+  const got = formatCompactValue(issue.got)
+  if (expected || got) {
+    message = `${message} | expected: ${expected ?? 'n/a'} | got: ${got ?? 'n/a'}`
+  }
+  return message
+}
+
+function formatCompactValue(value: unknown): string | null {
+  if (value === null || value === undefined) return null
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+
+  try {
+    const serialized = JSON.stringify(value)
+    if (!serialized) return null
+    return serialized.length > 180 ? `${serialized.slice(0, 177)}...` : serialized
+  } catch {
+    return String(value)
+  }
 }
 
 function getSharedNonOutputActivation(
@@ -660,40 +956,174 @@ function getDefaultLayerName(nodeId: string, role: LayerRole): string {
   return `Layer ${match[1]}`
 }
 
-function getWeightCount(
-  nodes: Record<string, LayerNode>,
-  edges: Record<string, Edge>
-): number {
-  return Object.values(edges).reduce((total, edge) => {
-    const source = nodes[edge.source]
-    const target = nodes[edge.target]
-    if (!source || !target) return total
-    return total + getLayerNeuronCount(source) * getLayerNeuronCount(target)
-  }, 0)
-}
-
-function getBiasCount(
-  nodes: Record<string, LayerNode>,
-  edges: Record<string, Edge>
-): number {
-  const uniqueTargetIds = new Set<string>()
-  Object.values(edges).forEach((edge) => {
-    if (!nodes[edge.source] || !nodes[edge.target] || edge.source === edge.target) return
-    uniqueTargetIds.add(edge.target)
-  })
-
-  let totalBiases = 0
-  uniqueTargetIds.forEach((targetId) => {
-    const targetNode = nodes[targetId]
-    if (!targetNode) return
-    totalBiases += getLayerNeuronCount(targetNode)
-  })
-  return totalBiases
-}
-
 function getLayerTypeSummary(nodes: Record<string, LayerNode>): string {
   const nodeTypes = new Set(Object.values(nodes).map((node) => node.type))
   if (nodeTypes.size === 0) return 'None'
   if (nodeTypes.size === 1) return Array.from(nodeTypes)[0]
   return 'Mixed'
+}
+
+function getLayerSizeLabel(node: LayerNode): string {
+  if (node.type === 'Input') {
+    const shape = toShapeArray(node.config.shape)
+    if (shape) {
+      return shape.join(' x ')
+    }
+    return DEFAULT_INPUT_SHAPE.join(' x ')
+  }
+
+  if (node.type === 'Output') {
+    const classes = toPositiveInt(node.config.num_classes, 0)
+    if (classes > 0) return `${classes} classes`
+    return `${DEFAULT_OUTPUT_CLASSES} classes`
+  }
+
+  if (node.type === 'Dropout') {
+    const rate = Number(node.config.rate)
+    if (Number.isFinite(rate)) {
+      return `p=${rate.toFixed(2)}`
+    }
+    return 'p=0.50'
+  }
+
+  if (node.type === 'Flatten') {
+    return 'Flatten'
+  }
+
+  const rows = toPositiveInt(node.config.rows, DEFAULT_LAYER_ROWS)
+  const cols = toPositiveInt(node.config.cols, DEFAULT_LAYER_COLS)
+  return `${rows} x ${cols}`
+}
+
+function toShapeArray(rawShape: unknown): number[] | null {
+  if (!Array.isArray(rawShape) || rawShape.length === 0) return null
+  const values = rawShape.map((value) => toPositiveInt(value, 0))
+  if (values.some((value) => value <= 0)) return null
+  return values
+}
+
+function toInputShapeOrDefault(rawShape: unknown): [number, number, number] {
+  if (!Array.isArray(rawShape) || rawShape.length !== 3) {
+    return [...DEFAULT_INPUT_SHAPE]
+  }
+  const parsed = rawShape.map((value) => toPositiveInt(value, 0))
+  if (parsed.some((value) => value <= 0)) {
+    return [...DEFAULT_INPUT_SHAPE]
+  }
+  return [parsed[0], parsed[1], parsed[2]]
+}
+
+function nodeUnits(node: LayerNode): number {
+  const units = toPositiveInt(node.config.units, 0)
+  if (units > 0) return units
+  const rows = toPositiveInt(node.config.rows, DEFAULT_LAYER_ROWS)
+  const cols = toPositiveInt(node.config.cols, DEFAULT_LAYER_COLS)
+  return rows * cols
+}
+
+function denseGridFromUnits(units: number): { rows: number; cols: number } {
+  if (units <= 1) return { rows: 1, cols: 1 }
+
+  let bestRows = 1
+  let bestCols = units
+  let bestGap = bestCols - bestRows
+
+  for (let rows = 1; rows <= Math.floor(Math.sqrt(units)); rows += 1) {
+    if (units % rows !== 0) continue
+    const cols = units / rows
+    const gap = Math.abs(cols - rows)
+    if (gap < bestGap) {
+      bestGap = gap
+      bestRows = rows
+      bestCols = cols
+    }
+  }
+
+  return { rows: bestRows, cols: bestCols }
+}
+
+function clampDropoutRate(value: unknown): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return 0.5
+  if (parsed < 0) return 0
+  if (parsed >= 1) return 0.99
+  return Number(parsed.toFixed(4))
+}
+
+function computeGraphStats(
+  nodes: Record<string, LayerNode>,
+  orderedNodeIds: string[]
+): {
+  neuronCount: number
+  weightCount: number
+  biasCount: number
+} {
+  let neuronCount = 0
+  let weightCount = 0
+  let biasCount = 0
+  let previousOutputShape: number[] | null = null
+
+  for (const nodeId of orderedNodeIds) {
+    const node = nodes[nodeId]
+    if (!node) continue
+
+    const inputShape = node.type === 'Input' ? null : previousOutputShape
+    const outputShape = inferNodeOutputShape(node, inputShape)
+    if (outputShape !== null) {
+      neuronCount += product(outputShape)
+    }
+
+    if ((node.type === 'Dense' || node.type === 'Output') && inputShape && outputShape) {
+      if (inputShape.length === 1 && outputShape.length === 1) {
+        const inFeatures = inputShape[0]
+        const outFeatures = outputShape[0]
+        weightCount += inFeatures * outFeatures
+        biasCount += outFeatures
+      }
+    }
+
+    previousOutputShape = outputShape
+  }
+
+  return { neuronCount, weightCount, biasCount }
+}
+
+function inferNodeOutputShape(
+  node: LayerNode,
+  inputShape: number[] | null
+): number[] | null {
+  if (node.type === 'Input') {
+    return toInputShapeOrDefault(node.config.shape)
+  }
+
+  if (!inputShape) return null
+
+  if (node.type === 'Flatten') {
+    return [product(inputShape)]
+  }
+
+  if (node.type === 'Dense') {
+    if (inputShape.length !== 1) return null
+    const units = toPositiveInt(node.config.units, 0)
+    if (units > 0) return [units]
+
+    const rows = toPositiveInt(node.config.rows, DEFAULT_LAYER_ROWS)
+    const cols = toPositiveInt(node.config.cols, DEFAULT_LAYER_COLS)
+    return [rows * cols]
+  }
+
+  if (node.type === 'Dropout') {
+    return [...inputShape]
+  }
+
+  if (node.type === 'Output') {
+    if (inputShape.length !== 1) return null
+    return [toPositiveInt(node.config.num_classes, DEFAULT_OUTPUT_CLASSES)]
+  }
+
+  return null
+}
+
+function product(values: number[]): number {
+  return values.reduce((acc, value) => acc * value, 1)
 }

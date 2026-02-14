@@ -27,6 +27,7 @@ class JobEntry:
     model: Any | None = None
     input_shape: list[int] | None = None
     num_classes: int | None = None
+    job_dir: Path | None = None
     condition: asyncio.Condition = field(default_factory=asyncio.Condition)
 
 
@@ -71,6 +72,9 @@ class JobRegistry:
     def set_task(self, job_id: str, task: asyncio.Task) -> None:
         entry = self._jobs[job_id]
         entry.task = task
+
+    def set_job_dir(self, job_id: str, job_dir: Path) -> None:
+        self._jobs[job_id].job_dir = job_dir
 
     def set_status(self, job_id: str, status: str) -> None:
         entry = self._jobs[job_id]

@@ -24,7 +24,9 @@ def test_model_validate_and_compile(client) -> None:
     assert "class GeneratedModel" in compile_data["python_source"]
 
 
-def test_model_latest_endpoint(client) -> None:
+def test_model_latest_endpoint(monkeypatch, client, tmp_path) -> None:
+    monkeypatch.setattr("routers.model.ARTIFACTS_DIR", tmp_path)
+
     latest_before = client.get("/api/model/latest")
     assert latest_before.status_code == 200
     assert latest_before.json()["job_id"] is None
@@ -56,7 +58,9 @@ def test_train_stop_and_export(monkeypatch, client, tmp_path) -> None:
         job_registry.set_status(job_id, "running")
 
         # Simulate minimal train lifecycle and artifact creation.
-        artifact = tmp_path / f"{job_id}.pt"
+        artifact_dir = entry.job_dir or tmp_path
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        artifact = artifact_dir / "model.pt"
         artifact.write_bytes(b"fake-model")
 
         await asyncio.sleep(0.05)
@@ -77,6 +81,7 @@ def test_train_stop_and_export(monkeypatch, client, tmp_path) -> None:
         )
 
     monkeypatch.setattr("routers.model.run_training_job", fake_run_training_job)
+    monkeypatch.setattr("routers.model.ARTIFACTS_DIR", tmp_path)
 
     payload = build_graph_payload(
         training={
@@ -123,3 +128,12 @@ def test_train_stop_and_export(monkeypatch, client, tmp_path) -> None:
     pt_export = client.get(f"/api/model/export?job_id={job_id}&format=pt")
     assert pt_export.status_code == 200
     assert pt_export.content == b"fake-model"
+
+    # Ensure export works from persisted bundle even after in-memory registry reset.
+    job_registry.clear()
+    py_export_after_clear = client.get(f"/api/model/export?job_id={job_id}&format=py")
+    assert py_export_after_clear.status_code == 200
+    assert "class GeneratedModel" in py_export_after_clear.text
+    pt_export_after_clear = client.get(f"/api/model/export?job_id={job_id}&format=pt")
+    assert pt_export_after_clear.status_code == 200
+    assert pt_export_after_clear.content == b"fake-model"

@@ -45,8 +45,12 @@ def test_rf_validate_compile_and_datasets(client) -> None:
 def test_rf_train_stop_export_and_infer(monkeypatch, client, tmp_path) -> None:
     async def fake_run_rf_training_job(job_id, compiled, training, artifacts_dir):
         rf_job_registry.set_status(job_id, "running")
+        entry = rf_job_registry.get(job_id)
+        assert entry is not None
         model = _FakeRFModel()
-        artifact_path = tmp_path / f"{job_id}.pkl"
+        artifact_dir = entry.job_dir or tmp_path
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = artifact_dir / "model.pkl"
         payload = {
             "model": model,
             "dataset": "iris",
@@ -85,6 +89,7 @@ def test_rf_train_stop_export_and_infer(monkeypatch, client, tmp_path) -> None:
         )
 
     monkeypatch.setattr("routers.rf_model.run_rf_training_job", fake_run_rf_training_job)
+    monkeypatch.setattr("routers.rf_model.ARTIFACTS_DIR", tmp_path)
 
     payload = build_rf_graph_payload(training={"dataset": "iris", "testSize": 0.2, "randomState": 7})
     train_res = client.post("/api/rf/train", json=payload)
@@ -117,3 +122,11 @@ def test_rf_train_stop_export_and_infer(monkeypatch, client, tmp_path) -> None:
 
     artifact_export = client.get(f"/api/rf/export?job_id={job_id}&format=pkl")
     assert artifact_export.status_code == 200
+
+    # Ensure export works from persisted bundle even after in-memory registry reset.
+    rf_job_registry.clear()
+    py_export_after_clear = client.get(f"/api/rf/export?job_id={job_id}&format=py")
+    assert py_export_after_clear.status_code == 200
+    assert "GeneratedRandomForestModel" in py_export_after_clear.text
+    artifact_export_after_clear = client.get(f"/api/rf/export?job_id={job_id}&format=pkl")
+    assert artifact_export_after_clear.status_code == 200

@@ -8,6 +8,7 @@ import torch.nn as nn
 
 from core.graph_compiler import CompiledGraphResult
 from core.job_registry import job_registry
+from core.job_storage import NN_ARTIFACT_FILENAME, update_job_metadata
 from core.weight_extractor import extract_weight_snapshot
 from datasets.loader import get_mnist_dataloaders
 from models.training_config import TrainingConfig
@@ -81,6 +82,8 @@ async def run_training_job(
 
     try:
         job_registry.set_status(job_id, "running")
+        if entry.job_dir is not None:
+            update_job_metadata(entry.job_dir, status="running", terminal=False)
         model = compiled.model
         device = torch.device("cpu")
         model.to(device)
@@ -155,8 +158,12 @@ async def run_training_job(
                 },
             )
 
-        artifacts_dir.mkdir(parents=True, exist_ok=True)
-        artifact_path = artifacts_dir / f"{job_id}.pt"
+        if entry.job_dir is not None:
+            entry.job_dir.mkdir(parents=True, exist_ok=True)
+            artifact_path = entry.job_dir / NN_ARTIFACT_FILENAME
+        else:
+            artifacts_dir.mkdir(parents=True, exist_ok=True)
+            artifact_path = artifacts_dir / f"{job_id}.pt"
         torch.save(model.state_dict(), artifact_path)
 
         await job_registry.publish(
@@ -189,8 +196,25 @@ async def run_training_job(
             },
             artifact_path=artifact_path,
         )
+        if entry.job_dir is not None:
+            update_job_metadata(
+                entry.job_dir,
+                status=final_status,
+                terminal=True,
+                final_metrics={
+                    "final_train_loss": last_train_loss,
+                    "final_train_accuracy": last_train_accuracy,
+                    "final_test_loss": last_test_loss,
+                    "final_test_accuracy": last_test_accuracy,
+                    "final_loss": last_test_loss,
+                    "final_accuracy": last_test_accuracy,
+                },
+                artifact_path=str(artifact_path),
+            )
 
     except Exception as exc:  # pragma: no cover - error path is tested at API level
         message = str(exc)
         await job_registry.publish(job_id, {"type": "error", "message": message})
         await job_registry.mark_terminal(job_id, "failed", error=message)
+        if entry.job_dir is not None:
+            update_job_metadata(entry.job_dir, status="failed", terminal=True, error=message)

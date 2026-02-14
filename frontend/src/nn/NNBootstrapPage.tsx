@@ -105,14 +105,6 @@ export default function NNBootstrapPage() {
   }, [])
 
   return (
-    <>
-      <a
-        href="/"
-        className="fixed left-3 top-3 z-[100] rounded border border-cyan-200/35 bg-slate-900/70 px-3 py-1.5 text-xs font-medium text-cyan-50 backdrop-blur-sm"
-      >
-        Model Hub
-      </a>
-      <App />
-    </>
+    <App />
   )
 }

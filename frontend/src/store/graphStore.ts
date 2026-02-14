@@ -100,6 +100,9 @@ const DEFAULT_CONFIGS: Record<LayerType, LayerConfig> = {
   Output: { num_classes: 10, activation: 'softmax' },
 }
 
+const AUTO_LAYOUT_SPACING = 2.25
+const AUTO_LAYOUT_Y = 0.8
+
 // ── Store ──────────────────────────────────────────────
 
 interface GraphState {
@@ -732,11 +735,11 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   fromJSON: (json) => {
     const nodes: Record<string, LayerNode> = {}
     let maxNodeNum = 0
-    json.nodes.forEach((n, i) => {
+    json.nodes.forEach((n) => {
       nodes[n.id] = {
         id: n.id,
         type: n.type,
-        position: [i * 3, 0, 0],
+        position: [0, AUTO_LAYOUT_Y, 0],
         rotation: [0, 0, 0],
         config: n.config,
         shape: { input: null, output: null },
@@ -766,6 +769,17 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     })
 
     const edges = normalizeToSequentialEdges(nodes, parsedEdges)
+    const orderedNodeIds = getNeuralNetworkOrder(nodes, edges)
+    const seen = new Set(orderedNodeIds)
+    const remainingNodeIds = Object.keys(nodes).filter((nodeId) => !seen.has(nodeId))
+    const layoutNodeIds = [...orderedNodeIds, ...remainingNodeIds]
+    const center = (layoutNodeIds.length - 1) / 2
+    layoutNodeIds.forEach((nodeId, index) => {
+      const node = nodes[nodeId]
+      if (!node) return
+      const z = (center - index) * AUTO_LAYOUT_SPACING
+      node.position = [0, AUTO_LAYOUT_Y, z]
+    })
 
     nextNodeId = maxNodeNum > 0 ? maxNodeNum + 1 : nextNodeId
     nextEdgeId = maxEdgeNum > 0 ? maxEdgeNum + 1 : nextEdgeId

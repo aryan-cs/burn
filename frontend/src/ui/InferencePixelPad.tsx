@@ -10,6 +10,8 @@ import {
 const GRID_SIZE = 28
 const CANVAS_SIZE = 280
 const CELL_SIZE = CANVAS_SIZE / GRID_SIZE
+const ACTIVE_THRESHOLD = 0.05
+const MNIST_TARGET_MAX_DIM = 20
 
 type DrawMode = 'draw' | 'erase'
 
@@ -18,7 +20,9 @@ export function createEmptyInferenceGrid(): number[][] {
 }
 
 export function inferenceGridToPayload(grid: number[][]): number[][][] {
-  return [grid.map((row) => row.map((value) => Number(value.toFixed(4))))]
+  const normalized = normalizeGridShape(grid)
+  const preprocessed = preprocessForMnist(normalized)
+  return [preprocessed.map((row) => row.map((value) => Number(value.toFixed(4))))]
 }
 
 export function countActivePixels(grid: number[][]): number {
@@ -29,6 +33,174 @@ export function countActivePixels(grid: number[][]): number {
     }
   }
   return total
+}
+
+function normalizeGridShape(grid: number[][]): number[][] {
+  return Array.from({ length: GRID_SIZE }, (_, row) =>
+    Array.from({ length: GRID_SIZE }, (_, col) => {
+      const value = Number(grid[row]?.[col] ?? 0)
+      if (!Number.isFinite(value)) return 0
+      if (value <= 0) return 0
+      if (value >= 1) return 1
+      return value
+    })
+  )
+}
+
+function preprocessForMnist(grid: number[][]): number[][] {
+  const bbox = findActiveBoundingBox(grid)
+  if (!bbox) {
+    return grid
+  }
+
+  const cropHeight = bbox.maxRow - bbox.minRow + 1
+  const cropWidth = bbox.maxCol - bbox.minCol + 1
+  const scale = MNIST_TARGET_MAX_DIM / Math.max(cropHeight, cropWidth)
+  const targetHeight = Math.max(1, Math.round(cropHeight * scale))
+  const targetWidth = Math.max(1, Math.round(cropWidth * scale))
+
+  const cropped = cropGrid(grid, bbox.minRow, bbox.maxRow, bbox.minCol, bbox.maxCol)
+  const resized = resizeGridBilinear(cropped, targetHeight, targetWidth)
+  const centered = placeAtCenter(resized)
+  return centerByMass(centered)
+}
+
+function findActiveBoundingBox(
+  grid: number[][]
+): { minRow: number; maxRow: number; minCol: number; maxCol: number } | null {
+  let minRow = GRID_SIZE
+  let minCol = GRID_SIZE
+  let maxRow = -1
+  let maxCol = -1
+
+  for (let row = 0; row < GRID_SIZE; row += 1) {
+    for (let col = 0; col < GRID_SIZE; col += 1) {
+      if ((grid[row]?.[col] ?? 0) <= ACTIVE_THRESHOLD) continue
+      minRow = Math.min(minRow, row)
+      minCol = Math.min(minCol, col)
+      maxRow = Math.max(maxRow, row)
+      maxCol = Math.max(maxCol, col)
+    }
+  }
+
+  if (maxRow < 0 || maxCol < 0) return null
+  return { minRow, maxRow, minCol, maxCol }
+}
+
+function cropGrid(
+  grid: number[][],
+  minRow: number,
+  maxRow: number,
+  minCol: number,
+  maxCol: number
+): number[][] {
+  const out: number[][] = []
+  for (let row = minRow; row <= maxRow; row += 1) {
+    const nextRow: number[] = []
+    for (let col = minCol; col <= maxCol; col += 1) {
+      nextRow.push(grid[row]?.[col] ?? 0)
+    }
+    out.push(nextRow)
+  }
+  return out
+}
+
+function resizeGridBilinear(source: number[][], targetHeight: number, targetWidth: number): number[][] {
+  const sourceHeight = source.length
+  const sourceWidth = source[0]?.length ?? 0
+  if (sourceHeight === 0 || sourceWidth === 0) {
+    return Array.from({ length: targetHeight }, () =>
+      Array.from({ length: targetWidth }, () => 0)
+    )
+  }
+
+  const out: number[][] = Array.from({ length: targetHeight }, () =>
+    Array.from({ length: targetWidth }, () => 0)
+  )
+
+  for (let row = 0; row < targetHeight; row += 1) {
+    const srcY = ((row + 0.5) * sourceHeight) / targetHeight - 0.5
+    const y0 = clampInt(Math.floor(srcY), 0, sourceHeight - 1)
+    const y1 = clampInt(y0 + 1, 0, sourceHeight - 1)
+    const wy = srcY - y0
+
+    for (let col = 0; col < targetWidth; col += 1) {
+      const srcX = ((col + 0.5) * sourceWidth) / targetWidth - 0.5
+      const x0 = clampInt(Math.floor(srcX), 0, sourceWidth - 1)
+      const x1 = clampInt(x0 + 1, 0, sourceWidth - 1)
+      const wx = srcX - x0
+
+      const v00 = source[y0]?.[x0] ?? 0
+      const v01 = source[y0]?.[x1] ?? 0
+      const v10 = source[y1]?.[x0] ?? 0
+      const v11 = source[y1]?.[x1] ?? 0
+
+      const top = v00 * (1 - wx) + v01 * wx
+      const bottom = v10 * (1 - wx) + v11 * wx
+      out[row][col] = top * (1 - wy) + bottom * wy
+    }
+  }
+
+  return out
+}
+
+function placeAtCenter(source: number[][]): number[][] {
+  const sourceHeight = source.length
+  const sourceWidth = source[0]?.length ?? 0
+  const out = createEmptyInferenceGrid()
+  const top = Math.floor((GRID_SIZE - sourceHeight) / 2)
+  const left = Math.floor((GRID_SIZE - sourceWidth) / 2)
+
+  for (let row = 0; row < sourceHeight; row += 1) {
+    for (let col = 0; col < sourceWidth; col += 1) {
+      const rr = top + row
+      const cc = left + col
+      if (rr < 0 || rr >= GRID_SIZE || cc < 0 || cc >= GRID_SIZE) continue
+      out[rr][cc] = source[row][col]
+    }
+  }
+  return out
+}
+
+function centerByMass(grid: number[][]): number[][] {
+  let mass = 0
+  let rowMoment = 0
+  let colMoment = 0
+
+  for (let row = 0; row < GRID_SIZE; row += 1) {
+    for (let col = 0; col < GRID_SIZE; col += 1) {
+      const value = grid[row]?.[col] ?? 0
+      if (value <= 0) continue
+      mass += value
+      rowMoment += row * value
+      colMoment += col * value
+    }
+  }
+
+  if (mass <= 1e-6) return grid
+
+  const centerRow = rowMoment / mass
+  const centerCol = colMoment / mass
+  const targetCenter = (GRID_SIZE - 1) / 2
+  const shiftRow = Math.round(targetCenter - centerRow)
+  const shiftCol = Math.round(targetCenter - centerCol)
+
+  if (shiftRow === 0 && shiftCol === 0) return grid
+
+  const out = createEmptyInferenceGrid()
+  for (let row = 0; row < GRID_SIZE; row += 1) {
+    for (let col = 0; col < GRID_SIZE; col += 1) {
+      const rr = row + shiftRow
+      const cc = col + shiftCol
+      if (rr < 0 || rr >= GRID_SIZE || cc < 0 || cc >= GRID_SIZE) continue
+      out[rr][cc] = grid[row]?.[col] ?? 0
+    }
+  }
+  return out
+}
+
+function clampInt(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
 }
 
 interface InferencePixelPadProps {

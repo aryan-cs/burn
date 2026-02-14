@@ -84,6 +84,10 @@ Behavior:
 - Training uses the train split and evaluates on the test split each epoch.
 - WebSocket `epoch_update` includes both train and test metrics (`train_*`, `test_*`).
 - RF datasets are Kaggle-backed (`iris`, `wine`, `breast_cancer`) and fail fast if Kaggle auth/download is unavailable.
+- Every train job is persisted to disk for later reuse:
+  - NN jobs: `/Users/yax/programming/burn/backend/artifacts/jobs/<job_id>/`
+  - RF jobs: `/Users/yax/programming/burn/backend/artifacts/rf/jobs/<job_id>/`
+  - Bundle files include `model.py`, `graph.json`, `training.json`, `summary.json`, `metadata.json`, and trained artifact (`model.pt` or `model.pkl`) when available.
 
 Kaggle setup quick check:
 

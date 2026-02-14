@@ -27,6 +27,18 @@ export function getLayerRolesForColoring(
     roles.set(nodeId, 'hidden')
   })
 
+  const typedInputIds = nodeIds.filter((nodeId) => nodes[nodeId]?.type === 'Input')
+  const typedOutputIds = nodeIds.filter((nodeId) => nodes[nodeId]?.type === 'Output')
+  if (typedInputIds.length === 1) {
+    roles.set(typedInputIds[0], 'input')
+  }
+  if (typedOutputIds.length === 1 && typedOutputIds[0] !== typedInputIds[0]) {
+    roles.set(typedOutputIds[0], 'output')
+  }
+  if (typedInputIds.length === 1 && typedOutputIds.length === 1) {
+    return roles
+  }
+
   const validEdges = Object.values(edges).filter(
     (edge) => Boolean(nodes[edge.source]) && Boolean(nodes[edge.target])
   )

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from core.graph_compiler import CompiledGraphResult
 from core.job_registry import job_registry
@@ -22,15 +23,44 @@ def _build_optimizer(model: nn.Module, training: TrainingConfig) -> torch.optim.
     raise ValueError(f"Unsupported optimizer: {training.optimizer}")
 
 
-def _build_loss(training: TrainingConfig) -> nn.Module:
-    if training.loss == "cross_entropy":
-        return nn.CrossEntropyLoss()
+def _normalize_loss_name(value: str) -> str:
+    key = value.strip().lower().replace("-", "_").replace(" ", "_")
+    if key in {"cross_entropy", "crossentropy", "ce"}:
+        return "cross_entropy"
+    if key in {"mse", "mse_loss", "mean_squared_error"}:
+        return "mse"
+    raise ValueError(f"Unsupported loss function: {value}")
+
+
+def _build_loss(training: TrainingConfig) -> tuple[str, nn.Module]:
+    loss_name = _normalize_loss_name(training.loss)
+    if loss_name == "cross_entropy":
+        return loss_name, nn.CrossEntropyLoss()
+    if loss_name == "mse":
+        return loss_name, nn.MSELoss()
     raise ValueError(f"Unsupported loss function: {training.loss}")
+
+
+def _compute_loss(
+    loss_name: str,
+    loss_fn: nn.Module,
+    output: torch.Tensor,
+    target: torch.Tensor,
+) -> torch.Tensor:
+    if loss_name == "mse":
+        if output.ndim < 2:
+            raise ValueError("MSE loss requires model outputs with a class dimension")
+        target_one_hot = F.one_hot(target.long(), num_classes=output.shape[-1]).to(
+            dtype=output.dtype
+        )
+        return loss_fn(output, target_one_hot)
+    return loss_fn(output, target)
 
 
 async def _evaluate_model(
     model: nn.Module,
     dataloader,
+    loss_name: str,
     loss_fn: nn.Module,
     device: torch.device,
 ) -> tuple[float, float]:
@@ -46,7 +76,7 @@ async def _evaluate_model(
             batch_y = batch_y.to(device)
 
             output = model(batch_x)
-            loss = loss_fn(output, batch_y)
+            loss = _compute_loss(loss_name, loss_fn, output, batch_y)
 
             total_loss += float(loss.item())
             correct += int((output.argmax(1) == batch_y).sum().item())
@@ -87,7 +117,7 @@ async def run_training_job(
 
         train_loader, test_loader = get_mnist_dataloaders(training.batch_size)
         optimizer = _build_optimizer(model, training)
-        loss_fn = _build_loss(training)
+        loss_name, loss_fn = _build_loss(training)
 
         last_train_loss = 0.0
         last_train_accuracy = 0.0
@@ -113,7 +143,7 @@ async def run_training_job(
 
                 optimizer.zero_grad()
                 output = model(batch_x)
-                loss = loss_fn(output, batch_y)
+                loss = _compute_loss(loss_name, loss_fn, output, batch_y)
                 loss.backward()
                 optimizer.step()
 
@@ -134,6 +164,7 @@ async def run_training_job(
             last_test_loss, last_test_accuracy = await _evaluate_model(
                 model=model,
                 dataloader=test_loader,
+                loss_name=loss_name,
                 loss_fn=loss_fn,
                 device=device,
             )

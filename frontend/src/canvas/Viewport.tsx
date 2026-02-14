@@ -77,7 +77,7 @@ export function Viewport() {
         style={{ width: '100%', height: '100%' }}
         onPointerMissed={handlePointerMissed}
       >
-        <color attach="background" args={['#181818']} />
+        <color attach="background" args={['#000000']} />
         <ambientLight intensity={0.4} />
         <directionalLight position={[10, 10, 5]} intensity={0.8} />
         <pointLight position={[-10, -10, -5]} intensity={0.25} color="#9a9a9a" />

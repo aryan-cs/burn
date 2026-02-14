@@ -27,6 +27,8 @@ const ALIGN_LAYER_SPACING = 2.25
 const ALIGN_Y = 0.8
 const TRAIN_TO_TEST_SWITCH_DELAY_MS = 500
 const DEFAULT_ACTIVATION = 'linear'
+const DEFAULT_INFERENCE_ROWS = 28
+const DEFAULT_INFERENCE_COLS = 28
 const ACTIVATION_OPTIONS = [
   'linear',
   'relu',
@@ -191,6 +193,12 @@ function App() {
   const biasCount = stats.biasCount
   const layerTypeSummary = getLayerTypeSummary(nodes)
   const neuronCount = stats.neuronCount
+  const inferenceGridSize = getInferenceGridSizeFromInputLayer(
+    nodes,
+    orderedNodeIds,
+    DEFAULT_INFERENCE_ROWS,
+    DEFAULT_INFERENCE_COLS
+  )
 
   const trainingStatus = useTrainingStore((s) => s.status)
   const trainingJobId = useTrainingStore((s) => s.jobId)
@@ -205,16 +213,16 @@ function App() {
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null)
   const [draftName, setDraftName] = useState('')
   const [activeTab, setActiveTab] = useState<DashboardTab>('validate')
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const [hasValidatedModel, setHasValidatedModel] = useState(false)
   const [buildStatus, setBuildStatus] = useState<BuildStatus>('idle')
   const [buildIssues, setBuildIssues] = useState<string[]>([])
   const [buildWarnings, setBuildWarnings] = useState<string[]>([])
   const [backendBusyAction, setBackendBusyAction] = useState<string | null>(null)
-  const [backendMessage, setBackendMessage] = useState('Ready to validate/train.')
+  const [, setBackendMessage] = useState('Ready to validate/train.')
   const [inferenceGrid, setInferenceGrid] = useState<number[][]>(() =>
-    createEmptyInferenceGrid()
+    createEmptyInferenceGrid(inferenceGridSize.rows, inferenceGridSize.cols)
   )
-  const [inferenceOutput, setInferenceOutput] = useState('No inference output yet.')
   const [inferenceTopPrediction, setInferenceTopPrediction] = useState<number | null>(null)
   const isEditingName = Boolean(editingNodeId && editingNodeId === selectedNodeId)
   const isBackendBusy = backendBusyAction !== null
@@ -289,6 +297,17 @@ function App() {
     setBuildIssues([])
     setBuildWarnings([])
   }, [layerCount, edgeCount])
+
+  useEffect(() => {
+    setInferenceGrid((prev) => {
+      const prevRows = prev.length
+      const prevCols = prev.reduce((max, row) => Math.max(max, row.length), 0)
+      if (prevRows === inferenceGridSize.rows && prevCols === inferenceGridSize.cols) {
+        return prev
+      }
+      return createEmptyInferenceGrid(inferenceGridSize.rows, inferenceGridSize.cols)
+    })
+  }, [inferenceGridSize.rows, inferenceGridSize.cols])
 
   const handleAddLayer = () => {
     const state = useGraphStore.getState()
@@ -654,7 +673,6 @@ function App() {
         }),
       })
 
-      setInferenceOutput(JSON.stringify(response, null, 2))
       const nextPrediction = response.predictions?.[0]
       setInferenceTopPrediction(nextPrediction ?? null)
       setActiveTab('infer')
@@ -666,7 +684,7 @@ function App() {
     })
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${isSidebarCollapsed ? 'app-shell-collapsed' : ''}`}>
       <section className="app-sidebar">
         <div className="app-sidebar-inner">
           <div className="app-tab-strip">
@@ -784,6 +802,7 @@ function App() {
               onBatchSizeChange={(value) => setTrainingConfig({ batchSize: value })}
               onOptimizerChange={(value) => setTrainingConfig({ optimizer: value })}
               onLearningRateChange={(value) => setTrainingConfig({ learningRate: value })}
+              onLossChange={(value) => setTrainingConfig({ loss: value })}
               currentEpoch={currentEpoch}
               latestTrainLoss={latestTrainLoss}
               latestTrainAccuracy={latestTrainAccuracy}
@@ -805,25 +824,48 @@ function App() {
 
           {activeTab === 'infer' ? (
             <TestTab
-              trainingStatus={trainingStatus}
-              trainingStatusClass={getTrainingStatusClass(trainingStatus)}
-              trainingJobId={trainingJobId}
-              backendMessage={backendMessage}
               inferenceGrid={inferenceGrid}
               setInferenceGrid={setInferenceGrid}
               padDisabled={isBackendBusy || !trainingJobId || trainingStatus !== 'complete'}
               inferenceTopPrediction={inferenceTopPrediction}
-              inferenceOutput={inferenceOutput}
               onInferModel={handleInferModel}
               inferDisabled={isBackendBusy || !trainingJobId || trainingStatus !== 'complete'}
               inferLabel={backendBusyAction === 'infer' ? 'Inferencing...' : 'Run Inference'}
-              onBackToBuild={() => setActiveTab('validate')}
             />
           ) : null}
         </div>
       </section>
 
       <section className="app-viewport-panel">
+        <button
+          type="button"
+          onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+          className="sidebar-toggle-button"
+          aria-label={isSidebarCollapsed ? 'Expand left panel' : 'Collapse left panel'}
+          title={isSidebarCollapsed ? 'Expand' : 'Collapse'}
+        >
+          {isSidebarCollapsed ? (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              height="16px"
+              viewBox="0 -960 960 960"
+              width="16px"
+              fill="#e3e3e3"
+            >
+              <path d="m321-80-71-71 329-329-329-329 71-71 400 400L321-80Z" />
+            </svg>
+          ) : (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              height="16px"
+              viewBox="0 -960 960 960"
+              width="16px"
+              fill="#e3e3e3"
+            >
+              <path d="M560-80 160-480l400-400 71 71-329 329 329 329-71 71Z" />
+            </svg>
+          )}
+        </button>
         <Viewport />
         <button
           onClick={handleAlign}
@@ -863,17 +905,31 @@ function toStringOrFallback(value: unknown, fallback: string): string {
   return trimmed.length > 0 ? trimmed : fallback
 }
 
-function getTrainingStatusClass(status: string): string {
-  if (status === 'training') {
-    return 'status-pill status-pill-training'
+function getInferenceGridSizeFromInputLayer(
+  nodes: Record<string, LayerNode>,
+  orderedNodeIds: string[],
+  defaultRows: number,
+  defaultCols: number
+): { rows: number; cols: number } {
+  const inputNodeId = orderedNodeIds[0]
+  const inputNode = inputNodeId ? nodes[inputNodeId] : null
+  if (!inputNode) {
+    return { rows: defaultRows, cols: defaultCols }
   }
-  if (status === 'complete') {
-    return 'status-pill status-pill-complete'
+
+  const shape = inputNode.config.shape
+  if (Array.isArray(shape) && shape.length >= 3) {
+    const shapeRows = toPositiveInt(shape[1], 0)
+    const shapeCols = toPositiveInt(shape[2], 0)
+    if (shapeRows > 0 && shapeCols > 0) {
+      return { rows: shapeRows, cols: shapeCols }
+    }
   }
-  if (status === 'error') {
-    return 'status-pill status-pill-error'
+
+  return {
+    rows: toPositiveInt(inputNode.config.rows, defaultRows),
+    cols: toPositiveInt(inputNode.config.cols, defaultCols),
   }
-  return 'status-pill status-pill-idle'
 }
 
 function getBuildStatusMessage(status: BuildStatus, issueCount: number): string {

@@ -1,15 +1,20 @@
 import type { ReactNode } from 'react'
+import { InfoTooltip } from '../InfoTooltip'
 
 interface MetricTileProps {
   label: string
   value: string
   compact?: boolean
+  tooltip?: string
 }
 
-export function MetricTile({ label, value, compact = false }: MetricTileProps) {
+export function MetricTile({ label, value, compact = false, tooltip }: MetricTileProps) {
   return (
     <div className={`metric-tile ${compact ? 'metric-tile-compact' : ''}`}>
-      <p className="metric-tile-label">{label}</p>
+      <p className="metric-tile-label">
+        {label}
+        {tooltip && <InfoTooltip title={label} text={tooltip} position="top" />}
+      </p>
       <p className={`metric-tile-value ${compact ? 'metric-tile-value-compact' : ''}`}>
         {value}
       </p>

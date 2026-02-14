@@ -1,4 +1,6 @@
 import { useGraphStore, type LayerType } from '../store/graphStore'
+import { InfoTooltip } from './InfoTooltip'
+import { LAYER_TOOLTIPS } from './tooltipData'
 
 const LAYER_ITEMS: { type: LayerType; label: string; color: string }[] = [
   { type: 'Input', label: 'Input', color: '#4A4A4A' },
@@ -38,6 +40,7 @@ export function Palette() {
             style={{ backgroundColor: item.color }}
           />
           {item.label}
+          <InfoTooltip title={item.label} text={LAYER_TOOLTIPS[item.type]} position="right" />
         </button>
       ))}
     </div>

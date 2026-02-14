@@ -1,4 +1,6 @@
 import type { LayerRole } from '../../utils/graphOrder'
+import { InfoTooltip } from '../InfoTooltip'
+import { FIELD_TOOLTIPS } from '../tooltipData'
 import { MetricTile } from './Metrics'
 
 export interface BuildLayerItem {
@@ -136,7 +138,10 @@ export function BuildTab({
           </div>
           <div className="layer-editor-fields-row">
             <div className="field-group field-group-inline field-group-size">
-              <p className="field-label">Size</p>
+              <p className="field-label">
+                Size
+                <InfoTooltip title="Size" text={FIELD_TOOLTIPS.Size} position="top" />
+              </p>
               <div className="field-size-row">
                 <input
                   type="number"
@@ -166,6 +171,7 @@ export function BuildTab({
                 className="field-label"
               >
                 Activation
+                <InfoTooltip title="Activation" text={FIELD_TOOLTIPS.Activation} position="top" />
               </label>
               <select
                 id="layer-activation"
@@ -186,14 +192,15 @@ export function BuildTab({
 
       <section className="panel-card build-summary-card">
         <div className="summary-grid">
-          <MetricTile label="Layers" value={String(layerCount)} />
-          <MetricTile label="Neurons" value={String(neuronCount)} />
-          <MetricTile label="Weights" value={String(weightCount)} />
-          <MetricTile label="Biases" value={String(biasCount)} />
-          <MetricTile label="Layer Type" value={layerTypeSummary} />
+          <MetricTile label="Layers" value={String(layerCount)} tooltip={FIELD_TOOLTIPS.Layers} />
+          <MetricTile label="Neurons" value={String(neuronCount)} tooltip={FIELD_TOOLTIPS.Neurons} />
+          <MetricTile label="Weights" value={String(weightCount)} tooltip={FIELD_TOOLTIPS.Weights} />
+          <MetricTile label="Biases" value={String(biasCount)} tooltip={FIELD_TOOLTIPS.Biases} />
+          <MetricTile label="Layer Type" value={layerTypeSummary} tooltip={FIELD_TOOLTIPS['Layer Type']} />
           <MetricTile
             label="Shared Activation Function"
             value={formatActivationLabel(sharedNonOutputActivation)}
+            tooltip={FIELD_TOOLTIPS['Shared Activation Function']}
           />
         </div>
       </section>

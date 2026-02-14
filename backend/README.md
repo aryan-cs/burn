@@ -61,6 +61,19 @@ Behavior:
 - `GET /api/datasets`
 - `WS /ws/training/{job_id}`
 
+### Random Forest API
+
+- `POST /api/rf/validate`
+- `POST /api/rf/compile`
+- `POST /api/rf/train`
+- `POST /api/rf/stop`
+- `GET /api/rf/status?job_id=<id>`
+- `GET /api/rf/latest`
+- `POST /api/rf/infer`
+- `GET /api/rf/export?job_id=<id>&format=py|pkl`
+- `GET /api/rf/datasets`
+- `WS /ws/rf/training/{job_id}`
+
 ## Notes
 
 - v1 supports sequential graphs only.
@@ -70,6 +83,7 @@ Behavior:
 - You must have the Kaggle CLI configured (`kaggle.json` credentials).
 - Training uses the train split and evaluates on the test split each epoch.
 - WebSocket `epoch_update` includes both train and test metrics (`train_*`, `test_*`).
+- RF datasets are Kaggle-backed (`iris`, `wine`, `breast_cancer`) and fail fast if Kaggle auth/download is unavailable.
 
 Kaggle setup quick check:
 

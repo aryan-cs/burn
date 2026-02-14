@@ -46,6 +46,14 @@ const PRESET_CARDS: LaunchCard[] = [
     tone: 'nn',
   },
   {
+    title: 'Digits Starter MLP',
+    subtitle: 'Preset Project',
+    description: '8x8 handwritten digits classifier. Great first non-MNIST NN example.',
+    href: '/nn?mode=preset&template=digits_basic',
+    badge: 'NN',
+    tone: 'nn',
+  },
+  {
     title: 'Iris RF Classifier',
     subtitle: 'Preset Project',
     description: 'Classic low-dimensional classification with RandomForestClassifier.',
@@ -70,6 +78,9 @@ const PRESET_CARDS: LaunchCard[] = [
     tone: 'rf',
   },
 ]
+
+const NN_PRESET_CARDS = PRESET_CARDS.filter((card) => card.tone === 'nn')
+const RF_PRESET_CARDS = PRESET_CARDS.filter((card) => card.tone === 'rf')
 
 function LaunchCardView({ card }: { card: LaunchCard }) {
   return (
@@ -101,11 +112,24 @@ export default function ModelHubPage() {
           Start from an empty builder or launch a preset project that is configured to run immediately.
           RF presets require Kaggle credentials in the backend environment.
         </p>
+        <p className="hub-subtitle">
+          New: the Digits NN preset uses the built-in sklearn dataset and works without Kaggle setup.
+        </p>
+        <p className="hub-subtitle">
+          Need to manage live model endpoints later? Open{' '}
+          <a href="/deployments" className="hub-inline-link">
+            Deployment Manager
+          </a>
+          .
+        </p>
       </header>
 
       <main className="hub-main">
         <section className="hub-section">
           <h2 className="hub-section-title">Start From Scratch</h2>
+          <p className="hub-section-subtitle">
+            Open a clean workspace and build your pipeline layer-by-layer.
+          </p>
           <div className="hub-grid hub-grid-scratch">
             {SCRATCH_CARDS.map((card) => (
               <LaunchCardView key={card.title} card={card} />
@@ -115,10 +139,33 @@ export default function ModelHubPage() {
 
         <section className="hub-section">
           <h2 className="hub-section-title">Preset Example Projects</h2>
-          <div className="hub-grid hub-grid-preset">
-            {PRESET_CARDS.map((card) => (
-              <LaunchCardView key={card.title} card={card} />
-            ))}
+          <p className="hub-section-subtitle">
+            Ready-to-run projects grouped by model family so you can compare workflows quickly.
+          </p>
+          <div className="hub-family-grid">
+            <article className="hub-family-panel hub-family-panel-nn">
+              <header className="hub-family-head">
+                <div className="hub-family-label">Neural Networks</div>
+                <div className="hub-family-meta">PyTorch · 3D Layer Builder</div>
+              </header>
+              <div className="hub-grid hub-grid-family">
+                {NN_PRESET_CARDS.map((card) => (
+                  <LaunchCardView key={card.title} card={card} />
+                ))}
+              </div>
+            </article>
+
+            <article className="hub-family-panel hub-family-panel-rf">
+              <header className="hub-family-head">
+                <div className="hub-family-label">Random Forest</div>
+                <div className="hub-family-meta">scikit-learn · 3D Node Pipeline</div>
+              </header>
+              <div className="hub-grid hub-grid-family">
+                {RF_PRESET_CARDS.map((card) => (
+                  <LaunchCardView key={card.title} card={card} />
+                ))}
+              </div>
+            </article>
           </div>
         </section>
       </main>

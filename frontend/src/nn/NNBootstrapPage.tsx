@@ -66,6 +66,29 @@ const NN_PRESETS: Record<string, NNPreset> = {
       loss: 'cross_entropy',
     },
   },
+  digits_basic: {
+    graph: {
+      nodes: [
+        { id: 'node_1', type: 'Input', config: { shape: [1, 8, 8], name: 'input layer' } },
+        { id: 'node_2', type: 'Flatten', config: { name: 'flatten' } },
+        { id: 'node_3', type: 'Dense', config: { rows: 4, cols: 4, units: 16, activation: 'relu', name: 'hidden 1' } },
+        { id: 'node_4', type: 'Output', config: { num_classes: 10, activation: 'softmax', name: 'output layer' } },
+      ],
+      edges: [
+        { id: 'edge_1', source: 'node_1', target: 'node_2' },
+        { id: 'edge_2', source: 'node_2', target: 'node_3' },
+        { id: 'edge_3', source: 'node_3', target: 'node_4' },
+      ],
+    },
+    training: {
+      dataset: 'digits',
+      epochs: 25,
+      batchSize: 64,
+      optimizer: 'adam',
+      learningRate: 0.001,
+      loss: 'cross_entropy',
+    },
+  },
 }
 
 const DEFAULT_TRAINING = {

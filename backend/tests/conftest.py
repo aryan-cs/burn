@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from core.deployment_registry import deployment_registry
 from core.job_registry import job_registry
 from main import app
 
@@ -65,6 +66,8 @@ def build_rf_graph_payload(training: dict | None = None, *, feature_count: int =
 @pytest.fixture
 def client():
     job_registry.clear()
+    deployment_registry.clear()
     with TestClient(app) as test_client:
         yield test_client
     job_registry.clear()
+    deployment_registry.clear()

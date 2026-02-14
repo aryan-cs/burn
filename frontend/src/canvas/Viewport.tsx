@@ -4,7 +4,11 @@ import { useGraphStore } from '../store/graphStore'
 import { SceneManager } from './SceneManager'
 import { CameraRig } from './controls/CameraRig'
 
-export function Viewport() {
+interface ViewportProps {
+  lowDetailMode: boolean
+}
+
+export function Viewport({ lowDetailMode }: ViewportProps) {
   const draggingNodeId = useGraphStore((s) => s.draggingNodeId)
   const highlightSelectionActive = useGraphStore((s) => s.highlightSelectionActive)
   const highlightSelectionStart = useGraphStore((s) => s.highlightSelectionStart)
@@ -82,7 +86,7 @@ export function Viewport() {
         <directionalLight position={[10, 10, 5]} intensity={0.8} />
         <pointLight position={[-10, -10, -5]} intensity={0.25} color="#9a9a9a" />
         <gridHelper args={[40, 80, '#303030', '#242424']} />
-        <SceneManager />
+        <SceneManager lowDetailMode={lowDetailMode} />
         <CameraRig />
       </Canvas>
 

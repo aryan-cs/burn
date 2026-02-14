@@ -97,6 +97,7 @@ export function TrainTab({
               className="config-control"
             >
               <option value="mnist">MNIST</option>
+              <option value="digits">Digits (8x8)</option>
             </select>
           </label>
 

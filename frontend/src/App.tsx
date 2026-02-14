@@ -15,6 +15,7 @@ import {
   inferenceGridToPayload,
 } from './ui/InferencePixelPad'
 import { BuildTab } from './ui/tabs/BuildTab'
+import { DeployTab } from './ui/tabs/DeployTab'
 import { TestTab } from './ui/tabs/TestTab'
 import { TrainTab } from './ui/tabs/TrainTab'
 
@@ -29,6 +30,7 @@ const TRAIN_TO_TEST_SWITCH_DELAY_MS = 500
 const DEFAULT_ACTIVATION = 'linear'
 const DEFAULT_INFERENCE_ROWS = 28
 const DEFAULT_INFERENCE_COLS = 28
+const LOW_DETAIL_STORAGE_KEY = 'mlcanvas.nn.low_detail_mode'
 const ACTIVATION_OPTIONS = [
   'linear',
   'relu',
@@ -62,7 +64,27 @@ interface InferResponse {
   probabilities?: number[][]
 }
 
-type DashboardTab = 'validate' | 'train' | 'infer'
+interface DeploymentResponse {
+  deployment_id: string
+  job_id: string
+  status: string
+  target: string
+  endpoint_path: string
+  created_at: string
+  last_used_at?: string | null
+  request_count: number
+  name?: string | null
+}
+
+interface DeploymentInferResponse {
+  deployment_id: string
+  job_id: string
+  predictions?: number[]
+  probabilities?: number[][]
+  logits?: number[][]
+}
+
+type DashboardTab = 'validate' | 'train' | 'infer' | 'deploy'
 type BuildStatus = 'idle' | 'success' | 'error'
 
 async function requestJson<T>(
@@ -214,6 +236,10 @@ function App() {
   const [draftName, setDraftName] = useState('')
   const [activeTab, setActiveTab] = useState<DashboardTab>('validate')
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
+  const [isLowDetailMode, setIsLowDetailMode] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem(LOW_DETAIL_STORAGE_KEY) === '1'
+  })
   const [hasValidatedModel, setHasValidatedModel] = useState(false)
   const [buildStatus, setBuildStatus] = useState<BuildStatus>('idle')
   const [buildIssues, setBuildIssues] = useState<string[]>([])
@@ -224,6 +250,9 @@ function App() {
     createEmptyInferenceGrid(inferenceGridSize.rows, inferenceGridSize.cols)
   )
   const [inferenceTopPrediction, setInferenceTopPrediction] = useState<number | null>(null)
+  const [deployment, setDeployment] = useState<DeploymentResponse | null>(null)
+  const [deployTopPrediction, setDeployTopPrediction] = useState<number | null>(null)
+  const [deployOutput, setDeployOutput] = useState('No deployed inference output yet.')
   const isEditingName = Boolean(editingNodeId && editingNodeId === selectedNodeId)
   const isBackendBusy = backendBusyAction !== null
   const latestTrainingMetric = trainingMetrics[trainingMetrics.length - 1]
@@ -252,7 +281,10 @@ function App() {
   const canOpenInferTab =
     (trainingStatus === 'complete' || inferenceTopPrediction !== null) &&
     Boolean(trainingJobId)
-  const activeTabIndex = activeTab === 'validate' ? 0 : activeTab === 'train' ? 1 : 2
+  const canOpenDeployTab =
+    Boolean(deployment) || (Boolean(trainingJobId) && trainingStatus === 'complete')
+  const activeTabIndex =
+    activeTab === 'validate' ? 0 : activeTab === 'train' ? 1 : activeTab === 'infer' ? 2 : 3
 
   const runBackendAction = async (
     actionName: string,
@@ -290,6 +322,11 @@ function App() {
       window.clearTimeout(timer)
     }
   }, [trainingStatus])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(LOW_DETAIL_STORAGE_KEY, isLowDetailMode ? '1' : '0')
+  }, [isLowDetailMode])
 
   useEffect(() => {
     setHasValidatedModel(false)
@@ -636,6 +673,9 @@ function App() {
       })
 
       startTraining(response.job_id, trainingConfig.epochs)
+      setDeployment(null)
+      setDeployTopPrediction(null)
+      setDeployOutput('No deployed inference output yet.')
       setActiveTab('train')
       setBackendMessage(`Training started (job_id=${response.job_id}).`)
     })
@@ -681,6 +721,86 @@ function App() {
           ? `Inference complete. Predicted class ${nextPrediction}.`
           : 'Inference complete.'
       )
+    })
+
+  const handleDeployModel = () =>
+    runBackendAction('deploy', async () => {
+      if (!trainingJobId) {
+        throw new Error('Train a model before deploying.')
+      }
+      if (trainingStatus !== 'complete') {
+        throw new Error('Wait for training to complete before deploying.')
+      }
+
+      const response = await requestJson<DeploymentResponse>('/api/deploy', {
+        method: 'POST',
+        body: JSON.stringify({
+          job_id: trainingJobId,
+          target: 'local',
+          name: `${trainingConfig.dataset}-${trainingJobId.slice(0, 8)}`,
+        }),
+      })
+
+      setDeployment(response)
+      setActiveTab('deploy')
+    })
+
+  const handleRefreshDeployment = () =>
+    runBackendAction('deploy_status', async () => {
+      if (!deployment) {
+        throw new Error('No deployment to refresh.')
+      }
+
+      const response = await requestJson<DeploymentResponse>(
+        `/api/deploy/status?deployment_id=${deployment.deployment_id}`
+      )
+      setDeployment(response)
+    })
+
+  const handleStopDeployment = () =>
+    runBackendAction('deploy_stop', async () => {
+      if (!deployment) {
+        throw new Error('No deployment to stop.')
+      }
+
+      const response = await requestJson<DeploymentResponse>(
+        `/api/deploy/${deployment.deployment_id}`,
+        {
+          method: 'DELETE',
+        }
+      )
+      setDeployment(response)
+    })
+
+  const handleInferViaDeployment = () =>
+    runBackendAction('deploy_infer', async () => {
+      if (!deployment) {
+        throw new Error('Create a deployment first.')
+      }
+      if (deployment.status !== 'running') {
+        throw new Error('Deployment is not running.')
+      }
+
+      const response = await requestJson<DeploymentInferResponse>(
+        `/api/deploy/${deployment.deployment_id}/infer`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            inputs: inferenceGridToPayload(inferenceGrid),
+            return_probabilities: true,
+          }),
+        }
+      )
+
+      const nextPrediction = response.predictions?.[0]
+      setDeployTopPrediction(nextPrediction ?? null)
+      setDeployOutput(JSON.stringify(response, null, 2))
+
+      const status = await requestJson<DeploymentResponse>(
+        `/api/deploy/status?deployment_id=${deployment.deployment_id}`
+      )
+      setDeployment(status)
+      setActiveTab('deploy')
     })
 
   return (
@@ -732,6 +852,19 @@ function App() {
               }`}
             >
               Test
+            </button>
+            <button
+              type="button"
+              disabled={!canOpenDeployTab}
+              onClick={() => {
+                if (!canOpenDeployTab) return
+                setActiveTab('deploy')
+              }}
+              className={`app-tab-button ${
+                activeTab === 'deploy' ? 'app-tab-button-active' : 'app-tab-button-inactive'
+              }`}
+            >
+              Deploy
             </button>
           </div>
 
@@ -833,6 +966,37 @@ function App() {
               inferLabel={backendBusyAction === 'infer' ? 'Inferencing...' : 'Run Inference'}
             />
           ) : null}
+
+          {activeTab === 'deploy' ? (
+            <DeployTab
+              trainingJobId={trainingJobId}
+              trainingStatus={trainingStatus}
+              deployment={deployment}
+              deployTopPrediction={deployTopPrediction}
+              deployOutput={deployOutput}
+              onDeployModel={handleDeployModel}
+              onRefreshDeployment={handleRefreshDeployment}
+              onStopDeployment={handleStopDeployment}
+              onInferDeployment={handleInferViaDeployment}
+              deployDisabled={
+                isBackendBusy ||
+                !trainingJobId ||
+                trainingStatus !== 'complete' ||
+                deployment?.status === 'running'
+              }
+              refreshDisabled={isBackendBusy || !deployment}
+              stopDisabled={isBackendBusy || !deployment || deployment.status !== 'running'}
+              inferDisabled={isBackendBusy || !deployment || deployment.status !== 'running'}
+              deployLabel={backendBusyAction === 'deploy' ? 'Deploying...' : 'Deploy Locally'}
+              refreshLabel={backendBusyAction === 'deploy_status' ? 'Refreshing...' : 'Refresh'}
+              stopLabel={backendBusyAction === 'deploy_stop' ? 'Stopping...' : 'Stop Deploy'}
+              inferLabel={
+                backendBusyAction === 'deploy_infer'
+                  ? 'Running Endpoint...'
+                  : 'Run Endpoint Inference'
+              }
+            />
+          ) : null}
         </div>
       </section>
 
@@ -866,7 +1030,29 @@ function App() {
             </svg>
           )}
         </button>
-        <Viewport />
+        <Viewport lowDetailMode={isLowDetailMode} />
+        <button
+          type="button"
+          onClick={() => setIsLowDetailMode((prev) => !prev)}
+          className={`detail-mode-button ${
+            isLowDetailMode ? 'detail-mode-button-active' : ''
+          }`}
+          aria-pressed={isLowDetailMode}
+          aria-label="Toggle low detail mode"
+          title="Reduce connection line detail for better performance"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            height="16px"
+            viewBox="0 -960 960 960"
+            width="16px"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path d="M120-200v-80h240v80H120Zm0-200v-80h480v80H120Zm0-200v-80h720v80H120Z" />
+          </svg>
+          <span>{isLowDetailMode ? 'Low Detail' : 'Full Detail'}</span>
+        </button>
         <button
           onClick={handleAlign}
           disabled={layerCount === 0}

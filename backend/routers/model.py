@@ -22,6 +22,7 @@ from core.job_storage import (
 from core.job_registry import job_registry
 from core.shape_inference import validate_graph
 from core.training_engine import run_training_job
+from datasets.registry import get_dataset_meta
 from models.graph_schema import GraphSpec
 from models.training_config import normalize_training_config
 
@@ -113,24 +114,33 @@ def _extract_shapes_from_summary(summary: dict) -> tuple[list[int] | None, int |
     return input_shape, num_classes
 
 
-def _validate_mnist_contract(input_shape: list[int] | None, num_classes: int | None) -> list[dict[str, object]]:
+def _validate_dataset_contract(
+    dataset_id: str,
+    input_shape: list[int] | None,
+    num_classes: int | None,
+) -> list[dict[str, object]]:
     errors: list[dict[str, object]] = []
-    expected_input = [1, 28, 28]
-    expected_classes = 10
+    meta = get_dataset_meta(dataset_id)
+    if meta is None:
+        return [{"message": f"Unsupported dataset for v1: {dataset_id}"}]
 
-    if input_shape != expected_input:
+    expected_input = meta.get("input_shape")
+    expected_classes = meta.get("num_classes")
+    dataset_name = str(meta.get("name", dataset_id))
+
+    if isinstance(expected_input, list) and input_shape != expected_input:
         errors.append(
             {
-                "message": "MNIST dataset requires Input.shape=[1, 28, 28]",
+                "message": f"{dataset_name} requires Input.shape={expected_input}",
                 "expected": expected_input,
                 "got": input_shape,
             }
         )
 
-    if num_classes != expected_classes:
+    if isinstance(expected_classes, int) and num_classes != expected_classes:
         errors.append(
             {
-                "message": "MNIST dataset requires Output.num_classes=10",
+                "message": f"{dataset_name} requires Output.num_classes={expected_classes}",
                 "expected": expected_classes,
                 "got": num_classes,
             }
@@ -211,7 +221,7 @@ async def compile_model(graph: GraphSpec):
 async def train_model(graph: GraphSpec):
     training = normalize_training_config(graph.training)
 
-    if training.dataset != "mnist":
+    if get_dataset_meta(training.dataset) is None:
         raise HTTPException(
             status_code=400,
             detail={"errors": [{"message": f"Unsupported dataset for v1: {training.dataset}"}]},
@@ -223,9 +233,9 @@ async def train_model(graph: GraphSpec):
         raise HTTPException(status_code=400, detail={"errors": exc.errors}) from exc
 
     input_shape, num_classes = _extract_shapes_from_summary(compiled.summary)
-    mnist_contract_errors = _validate_mnist_contract(input_shape, num_classes)
-    if mnist_contract_errors:
-        raise HTTPException(status_code=400, detail={"errors": mnist_contract_errors})
+    dataset_contract_errors = _validate_dataset_contract(training.dataset, input_shape, num_classes)
+    if dataset_contract_errors:
+        raise HTTPException(status_code=400, detail={"errors": dataset_contract_errors})
 
     entry = job_registry.create_job(
         compiled.python_source,

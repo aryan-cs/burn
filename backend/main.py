@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from routers.deploy import router as deploy_router
 from routers.datasets import router as datasets_router
 from routers.model import router as model_router
 from routers.rf_datasets import router as rf_datasets_router
@@ -32,6 +33,7 @@ app.add_middleware(
 )
 
 app.include_router(model_router)
+app.include_router(deploy_router)
 app.include_router(datasets_router)
 app.include_router(websocket_router)
 app.include_router(rf_model_router)

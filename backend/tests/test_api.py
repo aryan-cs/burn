@@ -24,6 +24,14 @@ def test_model_validate_and_compile(client) -> None:
     assert "class GeneratedModel" in compile_data["python_source"]
 
 
+def test_datasets_endpoint_lists_digits(client) -> None:
+    res = client.get("/api/datasets")
+    assert res.status_code == 200
+    data = res.json()
+    dataset_ids = {entry["id"] for entry in data["datasets"]}
+    assert {"mnist", "digits"}.issubset(dataset_ids)
+
+
 def test_model_latest_endpoint(monkeypatch, client, tmp_path) -> None:
     monkeypatch.setattr("routers.model.ARTIFACTS_DIR", tmp_path)
 
@@ -49,6 +57,25 @@ def test_model_validate_error(client) -> None:
     data = res.json()
     assert data["valid"] is False
     assert any("unknown" in err["message"].lower() for err in data["errors"])
+
+
+def test_train_rejects_shape_for_selected_dataset(client) -> None:
+    payload = build_graph_payload(
+        training={
+            "dataset": "digits",
+            "epochs": 1,
+            "batchSize": 8,
+            "optimizer": "adam",
+            "learningRate": 0.001,
+            "loss": "cross_entropy",
+        }
+    )
+    # Graph is still [1, 28, 28] / 10-class MNIST-style, so digits contract should fail.
+    res = client.post("/api/model/train", json=payload)
+    assert res.status_code == 400
+    error_messages = [item["message"] for item in res.json()["detail"]["errors"]]
+    assert any("Digits" in message for message in error_messages)
+    assert any("Input.shape=[1, 8, 8]" in message for message in error_messages)
 
 
 def test_train_stop_and_export(monkeypatch, client, tmp_path) -> None:

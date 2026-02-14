@@ -11,7 +11,7 @@ from core.graph_compiler import CompiledGraphResult
 from core.job_registry import job_registry
 from core.job_storage import NN_ARTIFACT_FILENAME, update_job_metadata
 from core.weight_extractor import extract_weight_snapshot
-from datasets.loader import get_mnist_dataloaders
+from datasets.loader import get_dataset_dataloaders
 from models.training_config import TrainingConfig
 
 
@@ -104,12 +104,6 @@ async def run_training_job(
     if entry is None:
         return
 
-    if training.dataset != "mnist":
-        message = f"Unsupported dataset for v1: {training.dataset}"
-        await job_registry.publish(job_id, {"type": "error", "message": message})
-        await job_registry.mark_terminal(job_id, "failed", error=message)
-        return
-
     try:
         job_registry.set_status(job_id, "running")
         if entry.job_dir is not None:
@@ -118,7 +112,7 @@ async def run_training_job(
         device = torch.device("cpu")
         model.to(device)
 
-        train_loader, test_loader = get_mnist_dataloaders(training.batch_size)
+        train_loader, test_loader = get_dataset_dataloaders(training.dataset, training.batch_size)
         optimizer = _build_optimizer(model, training)
         loss_name, loss_fn = _build_loss(training)
 

@@ -484,19 +484,86 @@ button {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-top: 8px;
+  /* margin-top: 8px; */
+}
+
+.train-accuracy-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
+  gap: 0 10px;
+  align-items: stretch;
+}
+
+.train-graph-pane {
+  min-width: 0;
+}
+
+.train-graph-divider {
+  width: 1px;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .train-graph-block .panel-chart {
   margin-top: 6px;
 }
 
+.loss-surface-shell {
+  position: relative;
+  width: 100%;
+  height: 195px;
+  overflow: hidden;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  background: #22272f;
+}
+
+.loss-surface-canvas {
+  width: 100%;
+  height: 100% !important;
+}
+
+.loss-surface-caption {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  padding: 2px 6px;
+  border: 1px solid rgba(125, 211, 252, 0.4);
+  border-radius: 999px;
+  background: rgba(10, 10, 15, 0.58);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(224, 242, 254, 0.9);
+}
+
+.loss-surface-epoch {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  padding: 2px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  background: rgba(10, 10, 15, 0.58);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: rgba(255, 255, 255, 0.9);
+}
+
 .train-settings-card {
-  margin-top: 12px;
+  /* margin-top: 12px; */
 }
 
 .train-config-grid {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.train-config-grid .config-control {
+  width: 140px;
+}
+
+.train-config-grid .config-control-numeric {
+  width: 140px;
 }
 
 .field-label {
@@ -570,6 +637,20 @@ button {
   .layer-editor-divider {
     display: none;
   }
+
+  .train-graphs {
+    gap: 10px;
+  }
+
+  .train-accuracy-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .train-graph-divider {
+    width: 100%;
+    height: 1px;
+  }
 }
 
 .summary-grid {
@@ -607,11 +688,13 @@ button {
   border-radius: 4px;
   background: #2f2f2f;
   color: #ffffff;
+  text-align: center;
+  text-align-last: center;
 }
 
 .config-control-numeric {
   width: 80px;
-  text-align: right;
+  text-align: center;
 }
 
 .btn {
@@ -726,6 +809,7 @@ button {
 }
 
 .metric-chart {
+  position: relative;
   padding: 8px;
   border: 1px solid #3a3a3a;
   border-radius: 6px;
@@ -763,7 +847,41 @@ button {
 
 .metric-chart-svg {
   width: 100%;
-  height: 160px;
+  height: 220px;
+}
+
+.metric-chart-overlay {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  pointer-events: none;
+}
+
+.train-metric-overlay {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 148px;
+  padding: 4px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  background: rgba(10, 10, 15, 0.64);
+}
+
+.train-metric-overlay-line {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  font-size: 10px;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.train-metric-overlay-label {
+  color: rgba(255, 255, 255, 0.62);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .inference-top-prediction {

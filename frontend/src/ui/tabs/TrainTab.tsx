@@ -1,9 +1,11 @@
-import { MetricLineChart, MetricTile } from './Metrics'
+import { MetricLineChart } from './Metrics'
+import { LossSurfaceGraph } from './LossSurfaceGraph'
 
 interface TrainingConfigView {
   dataset: string
   epochs: number
   batchSize: number
+  optimizer: string
   learningRate: number
 }
 
@@ -13,9 +15,9 @@ interface TrainTabProps {
   onDatasetChange: (value: string) => void
   onEpochsChange: (value: number) => void
   onBatchSizeChange: (value: number) => void
+  onOptimizerChange: (value: string) => void
   onLearningRateChange: (value: number) => void
   currentEpoch: number
-  totalEpochs: number
   latestTrainLoss: number | null
   latestTrainAccuracy: number | null
   latestTestLoss: number | null
@@ -39,9 +41,9 @@ export function TrainTab({
   onDatasetChange,
   onEpochsChange,
   onBatchSizeChange,
+  onOptimizerChange,
   onLearningRateChange,
   currentEpoch,
-  totalEpochs,
   latestTrainLoss,
   latestTrainAccuracy,
   latestTestLoss,
@@ -66,25 +68,14 @@ export function TrainTab({
           testAccuracySeries={testAccuracySeries}
           trainLossSeries={trainLossSeries}
           testLossSeries={testLossSeries}
+          latestTrainLoss={latestTrainLoss}
+          latestTrainAccuracy={latestTrainAccuracy}
+          latestTestLoss={latestTestLoss}
+          latestTestAccuracy={latestTestAccuracy}
+          currentEpoch={currentEpoch}
+          totalEpochs={trainingConfig.epochs}
+          optimizer={trainingConfig.optimizer}
         />
-
-        <div className="summary-grid">
-          <MetricTile
-            label="Epoch"
-            value={totalEpochs > 0 ? `${currentEpoch}/${totalEpochs}` : '0/0'}
-            compact
-          />
-          <MetricTile
-            label="Train"
-            value={formatTrainMetricText(latestTrainLoss, latestTrainAccuracy)}
-            compact
-          />
-          <MetricTile
-            label="Test"
-            value={formatTrainMetricText(latestTestLoss, latestTestAccuracy)}
-            compact
-          />
-        </div>
       </section>
 
       <section className="panel-card train-settings-card">
@@ -123,6 +114,22 @@ export function TrainTab({
               onChange={(e) => onBatchSizeChange(Math.max(1, Number(e.target.value) || 1))}
               className="config-control config-control-numeric"
             />
+          </label>
+
+          <label className="config-row">
+            <span className="config-label">Optimizer</span>
+            <select
+              value={trainingConfig.optimizer}
+              disabled={isBackendBusy}
+              onChange={(e) => onOptimizerChange(e.target.value)}
+              className="config-control"
+            >
+              {OPTIMIZER_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {formatOptionLabel(option)}
+                </option>
+              ))}
+            </select>
           </label>
 
           <label className="config-row">
@@ -170,6 +177,13 @@ interface TrainGraphsBlockProps {
   testLossSeries: number[]
   trainAccuracySeries: number[]
   testAccuracySeries: number[]
+  latestTrainLoss: number | null
+  latestTrainAccuracy: number | null
+  latestTestLoss: number | null
+  latestTestAccuracy: number | null
+  currentEpoch: number
+  totalEpochs: number
+  optimizer: string
 }
 
 function TrainGraphsBlock({
@@ -177,39 +191,80 @@ function TrainGraphsBlock({
   testLossSeries,
   trainAccuracySeries,
   testAccuracySeries,
+  latestTrainLoss,
+  latestTrainAccuracy,
+  latestTestLoss,
+  latestTestAccuracy,
+  currentEpoch,
+  totalEpochs,
+  optimizer,
 }: TrainGraphsBlockProps) {
+  const lossSeries = trainLossSeries.length > 0 ? trainLossSeries : testLossSeries
+
   return (
     <div className="train-graphs train-graph-block">
-      <div>
-        <h3 className="panel-subtitle">Accuracy</h3>
-        <div className="panel-chart">
-          <MetricLineChart
-            primaryLabel="Train Acc"
-            secondaryLabel="Test Acc"
-            primaryValues={trainAccuracySeries}
-            secondaryValues={testAccuracySeries}
-            maxValue={1}
-            xAxisLabel="Epoch"
-            yAxisLabel="Accuracy (%)"
-            xTickStep={0.05}
-            yTickStep={0.05}
-          />
+      <div className="train-accuracy-row">
+        <div className="train-graph-pane">
+          <h3 className="panel-subtitle">Train Accuracy</h3>
+          <div className="panel-chart">
+            <MetricLineChart
+              primaryLabel="Train Accuracy"
+              secondaryLabel="Train Loss"
+              primaryValues={trainAccuracySeries}
+              secondaryValues={trainLossSeries}
+              maxValue={Math.max(1, ...trainAccuracySeries, ...trainLossSeries, 0.01)}
+              xAxisLabel="Epoch"
+              yAxisLabel="Value"
+              xTickStep={0.05}
+              yTickStep={0.05}
+              bottomRightOverlay={
+                <div className="train-metric-overlay">
+                  <p className="train-metric-overlay-line">
+                    <span className="train-metric-overlay-label">Train</span>
+                    <span>{formatAccuracyValue(latestTrainAccuracy)} Accuracy, {formatLossValue(latestTrainLoss)} Loss</span>
+                  </p>
+                </div>
+              }
+            />
+          </div>
+        </div>
+
+        <div aria-hidden className="train-graph-divider" />
+
+        <div className="train-graph-pane">
+          <h3 className="panel-subtitle">Test Accuracy</h3>
+          <div className="panel-chart">
+            <MetricLineChart
+              primaryLabel="Test Accuracy"
+              secondaryLabel="Test Loss"
+              primaryValues={testAccuracySeries}
+              secondaryValues={testLossSeries}
+              maxValue={Math.max(1, ...testAccuracySeries, ...testLossSeries, 0.01)}
+              xAxisLabel="Epoch"
+              yAxisLabel="Value"
+              xTickStep={0.05}
+              yTickStep={0.05}
+              bottomRightOverlay={
+                <div className="train-metric-overlay">
+                  <p className="train-metric-overlay-line">
+                    <span className="train-metric-overlay-label">Test</span>
+                    <span>{formatAccuracyValue(latestTestAccuracy)} Accuracy, {formatLossValue(latestTestLoss)} Loss</span>
+                  </p>
+                </div>
+              }
+            />
+          </div>
         </div>
       </div>
 
-      <div>
-        <h3 className="panel-subtitle">Loss</h3>
+      <div className="train-graph-pane">
+        <h3 className="panel-subtitle">Loss Landscape</h3>
         <div className="panel-chart">
-          <MetricLineChart
-            primaryLabel="Train Loss"
-            secondaryLabel="Test Loss"
-            primaryValues={trainLossSeries}
-            secondaryValues={testLossSeries}
-            maxValue={Math.max(...trainLossSeries, ...testLossSeries, 0.01)}
-            xAxisLabel="Epoch"
-            yAxisLabel="Loss"
-            xTickStep={0.05}
-            yTickStep={0.05}
+          <LossSurfaceGraph
+            lossValues={lossSeries}
+            optimizer={optimizer}
+            currentEpoch={currentEpoch}
+            totalEpochs={totalEpochs}
           />
         </div>
       </div>
@@ -217,12 +272,26 @@ function TrainGraphsBlock({
   )
 }
 
-function formatTrainMetricText(
-  loss: number | null,
-  accuracy: number | null
-): string {
-  if (loss === null || accuracy === null) {
-    return 'N/A'
-  }
-  return `${(loss * 100).toFixed(2)}% Loss, ${(accuracy * 100).toFixed(1)}% Up`
+function formatLossValue(loss: number | null): string {
+  if (loss === null) return 'N/A'
+  return `${(loss * 100).toFixed(2)}%`
+}
+
+function formatAccuracyValue(accuracy: number | null): string {
+  if (accuracy === null) return 'N/A'
+  return `${(accuracy * 100).toFixed(1)}%`
+}
+
+const OPTIMIZER_OPTIONS = ['adam', 'sgd']
+
+function formatOptionLabel(value: string): string {
+  if (!value) return ''
+  return value
+    .split('_')
+    .map((part) => {
+      if (part.length === 0) return part
+      if (part === 'sgd') return part.toUpperCase()
+      return part.charAt(0).toUpperCase() + part.slice(1)
+    })
+    .join(' ')
 }

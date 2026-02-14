@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 interface MetricTileProps {
   label: string
   value: string
@@ -25,6 +27,7 @@ interface MetricLineChartProps {
   yAxisLabel?: string
   xTickStep?: number
   yTickStep?: number
+  bottomRightOverlay?: ReactNode
 }
 
 export function MetricLineChart({
@@ -37,8 +40,10 @@ export function MetricLineChart({
   yAxisLabel = 'Value',
   xTickStep = 0.05,
   yTickStep = 0.05,
+  bottomRightOverlay,
 }: MetricLineChartProps) {
   const valuesCount = Math.max(primaryValues.length, secondaryValues.length)
+  const showSecondary = secondaryLabel.trim().length > 0 && secondaryValues.length > 0
   if (valuesCount === 0) {
     return (
       <div className="metric-chart-empty">
@@ -48,8 +53,8 @@ export function MetricLineChart({
   }
 
   const width = 330
-  const height = 160
-  const padding = { top: 12, right: 10, bottom: 32, left: 38 }
+  const height = 220
+  const padding = { top: 14, right: 10, bottom: 38, left: 40 }
   const plotWidth = width - padding.left - padding.right
   const plotHeight = height - padding.top - padding.bottom
   const xDenominator = Math.max(valuesCount - 1, 1)
@@ -83,10 +88,12 @@ export function MetricLineChart({
           <span className="metric-chart-line metric-chart-line-primary" />
           {primaryLabel}
         </span>
-        <span className="metric-chart-legend-item">
-          <span className="metric-chart-line metric-chart-line-secondary" />
-          {secondaryLabel}
-        </span>
+        {showSecondary ? (
+          <span className="metric-chart-legend-item">
+            <span className="metric-chart-line metric-chart-line-secondary" />
+            {secondaryLabel}
+          </span>
+        ) : null}
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} className="metric-chart-svg">
         <line
@@ -133,7 +140,7 @@ export function MetricLineChart({
             />
           )
         })}
-        {secondaryValues.length > 1 ? (
+        {showSecondary && secondaryValues.length > 1 ? (
           <polyline
             points={secondaryPoints}
             fill="none"
@@ -169,6 +176,11 @@ export function MetricLineChart({
           {yAxisLabel}
         </text>
       </svg>
+      {bottomRightOverlay ? (
+        <div className="metric-chart-overlay">
+          {bottomRightOverlay}
+        </div>
+      ) : null}
     </div>
   )
 }

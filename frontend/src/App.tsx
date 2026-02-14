@@ -23,6 +23,7 @@ const DEFAULT_LAYER_COLS = 6
 const LAYER_SPACING = 4
 const ALIGN_LAYER_SPACING = 2.25
 const ALIGN_Y = 0.8
+const TRAIN_TO_TEST_SWITCH_DELAY_MS = 500
 const DEFAULT_ACTIVATION = 'linear'
 const ACTIVATION_OPTIONS = [
   'linear',
@@ -166,7 +167,6 @@ function App() {
   const setTrainingError = useTrainingStore((s) => s.setError)
   const trainingMetrics = useTrainingStore((s) => s.metrics)
   const currentEpoch = useTrainingStore((s) => s.currentEpoch)
-  const totalEpochs = useTrainingStore((s) => s.totalEpochs)
   const { sendStop } = useWebSocket()
 
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null)
@@ -230,8 +230,14 @@ function App() {
   }
 
   useEffect(() => {
-    if (trainingStatus === 'complete') {
+    if (trainingStatus !== 'complete') return
+
+    const timer = window.setTimeout(() => {
       setActiveTab('infer')
+    }, TRAIN_TO_TEST_SWITCH_DELAY_MS)
+
+    return () => {
+      window.clearTimeout(timer)
     }
   }, [trainingStatus])
 
@@ -452,7 +458,7 @@ function App() {
                 activeTab === 'validate' ? 'app-tab-button-active' : 'app-tab-button-inactive'
               }`}
             >
-              BUILD
+              Build
             </button>
             <button
               type="button"
@@ -520,9 +526,9 @@ function App() {
               onDatasetChange={(value) => setTrainingConfig({ dataset: value })}
               onEpochsChange={(value) => setTrainingConfig({ epochs: value })}
               onBatchSizeChange={(value) => setTrainingConfig({ batchSize: value })}
+              onOptimizerChange={(value) => setTrainingConfig({ optimizer: value })}
               onLearningRateChange={(value) => setTrainingConfig({ learningRate: value })}
               currentEpoch={currentEpoch}
-              totalEpochs={totalEpochs}
               latestTrainLoss={latestTrainLoss}
               latestTrainAccuracy={latestTrainAccuracy}
               latestTestLoss={latestTestLoss}
@@ -537,9 +543,7 @@ function App() {
               stopLabel={backendBusyAction === 'stop' ? 'Stopping...' : 'Stop Training'}
               onTrainModel={handleTrainModel}
               trainDisabled={isBackendBusy || !hasValidatedModel || layerCount === 0}
-              trainLabel={backendBusyAction === 'train' ? 'Training...' : 'Start Training'}
-              onGoToTest={() => setActiveTab('infer')}
-              goToTestDisabled={!canOpenInferTab}
+              trainLabel={backendBusyAction === 'train' ? 'Training...' : 'Train'}
             />
           ) : null}
 

@@ -68,3 +68,9 @@ def client():
     with TestClient(app) as test_client:
         yield test_client
     job_registry.clear()
+
+
+@pytest.fixture(autouse=True)
+def _default_local_training_env(monkeypatch):
+    monkeypatch.delenv("JETSON_HOST", raising=False)
+    monkeypatch.delenv("JETSON_PORT", raising=False)

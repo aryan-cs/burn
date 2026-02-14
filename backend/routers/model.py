@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -20,6 +21,7 @@ from core.job_storage import (
     update_job_metadata,
 )
 from core.job_registry import job_registry
+from core.remote_training import run_remote_training_job
 from core.shape_inference import validate_graph
 from core.training_engine import run_training_job
 from models.graph_schema import GraphSpec
@@ -28,6 +30,10 @@ from models.training_config import normalize_training_config
 
 router = APIRouter(prefix="/api/model", tags=["model"])
 ARTIFACTS_DIR = Path(__file__).resolve().parents[1] / "artifacts"
+
+
+def _should_use_remote_training() -> bool:
+    return bool(os.getenv("JETSON_HOST", "").strip())
 
 
 class StopRequest(BaseModel):
@@ -249,7 +255,10 @@ async def train_model(graph: GraphSpec):
         await job_registry.mark_terminal(entry.job_id, "failed", error=f"Failed to persist job bundle: {exc}")
         raise HTTPException(status_code=500, detail={"message": f"Failed to persist job bundle: {exc}"}) from exc
 
-    task = asyncio.create_task(run_training_job(entry.job_id, compiled, training, ARTIFACTS_DIR))
+    if _should_use_remote_training():
+        task = asyncio.create_task(run_remote_training_job(entry.job_id, graph, ARTIFACTS_DIR))
+    else:
+        task = asyncio.create_task(run_training_job(entry.job_id, compiled, training, ARTIFACTS_DIR))
     job_registry.set_task(entry.job_id, task)
 
     return {"job_id": entry.job_id, "status": entry.status}

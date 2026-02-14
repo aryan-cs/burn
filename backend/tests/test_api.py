@@ -137,3 +137,46 @@ def test_train_stop_and_export(monkeypatch, client, tmp_path) -> None:
     pt_export_after_clear = client.get(f"/api/model/export?job_id={job_id}&format=pt")
     assert pt_export_after_clear.status_code == 200
     assert pt_export_after_clear.content == b"fake-model"
+
+
+def test_train_uses_remote_worker_when_jetson_host_set(monkeypatch, client, tmp_path) -> None:
+    called = {"remote": False}
+
+    async def fake_run_remote_training_job(job_id, graph, artifacts_dir):
+        entry = job_registry.get(job_id)
+        assert entry is not None
+        called["remote"] = True
+        artifact_dir = entry.job_dir or tmp_path
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        artifact = artifact_dir / "model.pt"
+        artifact.write_bytes(b"remote-model")
+        await job_registry.publish(
+            job_id,
+            {
+                "type": "training_done",
+                "final_loss": 0.2,
+                "final_accuracy": 0.8,
+                "model_path": str(artifact),
+            },
+        )
+        await job_registry.mark_terminal(
+            job_id,
+            "completed",
+            final_metrics={"final_loss": 0.2, "final_accuracy": 0.8},
+            artifact_path=artifact,
+        )
+
+    monkeypatch.setattr("routers.model.run_remote_training_job", fake_run_remote_training_job)
+    monkeypatch.setattr("routers.model.ARTIFACTS_DIR", tmp_path)
+    monkeypatch.setenv("JETSON_HOST", "10.19.178.250")
+
+    train_res = client.post("/api/model/train", json=build_graph_payload())
+    assert train_res.status_code == 200
+    job_id = train_res.json()["job_id"]
+
+    time.sleep(0.1)
+
+    assert called["remote"] is True
+    status_res = client.get(f"/api/model/status?job_id={job_id}")
+    assert status_res.status_code == 200
+    assert status_res.json()["status"] in {"completed", "running", "queued"}

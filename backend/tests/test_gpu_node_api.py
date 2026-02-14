@@ -4,6 +4,7 @@ import asyncio
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -58,7 +59,16 @@ def test_gpu_node_train_events_and_artifact(monkeypatch, tmp_path) -> None:
         )
         await remote_job_registry.mark_terminal(job_id, "completed", artifact_path=artifact)
 
-    monkeypatch.setattr("gpu_node.routers.training.run_training_job", fake_run_training_job)
+    def fake_lazy_stack():
+        class DummyCompileError(Exception):
+            pass
+
+        def fake_compile_graph(graph, training):
+            return SimpleNamespace()
+
+        return DummyCompileError, fake_compile_graph, fake_run_training_job
+
+    monkeypatch.setattr("gpu_node.routers.training._lazy_load_training_stack", fake_lazy_stack)
 
     with TestClient(app) as client:
         headers = {"X-Jetson-Token": "jetson"}
@@ -91,7 +101,16 @@ def test_gpu_node_stop(monkeypatch) -> None:
             await asyncio.sleep(0.2)
             await remote_job_registry.mark_terminal(job_id, "stopped")
 
-        monkeypatch.setattr("gpu_node.routers.training.run_training_job", fake_run_training_job)
+        def fake_lazy_stack():
+            class DummyCompileError(Exception):
+                pass
+
+            def fake_compile_graph(graph, training):
+                return SimpleNamespace()
+
+            return DummyCompileError, fake_compile_graph, fake_run_training_job
+
+        monkeypatch.setattr("gpu_node.routers.training._lazy_load_training_stack", fake_lazy_stack)
         train_res = client.post("/train", json=build_graph_payload())
         assert train_res.status_code == 200
         job_id = train_res.json()["job_id"]

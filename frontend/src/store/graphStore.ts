@@ -242,6 +242,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   fromJSON: (json) => {
     const nodes: Record<string, LayerNode> = {}
+    let maxNodeNum = 0
     json.nodes.forEach((n, i) => {
       nodes[n.id] = {
         id: n.id,
@@ -251,11 +252,32 @@ export const useGraphStore = create<GraphState>((set, get) => ({
         config: n.config,
         shape: { input: null, output: null },
       }
+
+      const match = n.id.match(/_(\d+)$/)
+      if (match) {
+        const numeric = Number(match[1])
+        if (Number.isFinite(numeric)) {
+          maxNodeNum = Math.max(maxNodeNum, numeric)
+        }
+      }
     })
+
     const edges: Record<string, Edge> = {}
+    let maxEdgeNum = 0
     json.edges.forEach((e) => {
       edges[e.id] = { id: e.id, source: e.source, target: e.target }
+
+      const match = e.id.match(/_(\d+)$/)
+      if (match) {
+        const numeric = Number(match[1])
+        if (Number.isFinite(numeric)) {
+          maxEdgeNum = Math.max(maxEdgeNum, numeric)
+        }
+      }
     })
+
+    nextNodeId = maxNodeNum > 0 ? maxNodeNum + 1 : nextNodeId
+    nextEdgeId = maxEdgeNum > 0 ? maxEdgeNum + 1 : nextEdgeId
     set({ nodes, edges, selectedNodeId: null, selectedEdgeId: null })
   },
 

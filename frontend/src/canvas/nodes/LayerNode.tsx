@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ThreeEvent } from '@react-three/fiber'
+import type { ThreeEvent } from '@react-three/fiber'
 import { Text } from '@react-three/drei'
 import * as THREE from 'three'
 import { useGraphStore, type LayerNode, type LayerType } from '../../store/graphStore'

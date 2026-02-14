@@ -1,6 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useTrainingStore } from '../store/trainingStore'
-import { useGraphStore } from '../store/graphStore'
 
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null)
@@ -27,6 +26,10 @@ export function useWebSocket() {
             epoch: data.epoch,
             loss: data.loss,
             accuracy: data.accuracy,
+            trainLoss: data.train_loss,
+            trainAccuracy: data.train_accuracy,
+            testLoss: data.test_loss,
+            testAccuracy: data.test_accuracy,
           })
           if (data.weights) {
             updateWeights(data.weights)

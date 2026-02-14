@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ThreeEvent } from '@react-three/fiber'
+import type { ThreeEvent } from '@react-three/fiber'
 import { useGraphStore } from '../../store/graphStore'
 
 interface PortMeshProps {

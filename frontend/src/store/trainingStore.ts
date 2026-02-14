@@ -6,6 +6,10 @@ export interface EpochMetric {
   epoch: number
   loss: number
   accuracy: number
+  trainLoss?: number
+  trainAccuracy?: number
+  testLoss?: number
+  testAccuracy?: number
 }
 
 export interface WeightSnapshot {

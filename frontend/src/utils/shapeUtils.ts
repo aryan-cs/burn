@@ -1,4 +1,4 @@
-import type { LayerNode, LayerConfig } from '../store/graphStore'
+import type { LayerNode } from '../store/graphStore'
 
 /**
  * Quick client-side shape inference for display purposes.
@@ -21,7 +21,7 @@ export function inferOutputShape(
     case 'Conv2D': {
       if (inputShape.length < 3 || !config.filters || !config.kernel_size)
         return null
-      const [c, h, w] = inputShape
+      const [, h, w] = inputShape
       const pad = config.padding ?? 0
       const k = config.kernel_size
       const outH = h + 2 * pad - k + 1

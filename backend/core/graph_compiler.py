@@ -59,15 +59,19 @@ def _activation_module(name: str | None) -> tuple[nn.Module | None, str | None]:
     if name is None:
         return None, None
 
-    key = name.strip().lower()
+    key = name.strip().lower().replace("-", "_").replace(" ", "_")
     if key in {"none", "identity", "linear", ""}:
         return None, None
     if key == "relu":
         return nn.ReLU(), "nn.ReLU()"
+    if key in {"leaky_relu", "leakyrelu", "lrelu"}:
+        return nn.LeakyReLU(negative_slope=0.01), "nn.LeakyReLU(negative_slope=0.01)"
     if key == "sigmoid":
         return nn.Sigmoid(), "nn.Sigmoid()"
     if key == "tanh":
         return nn.Tanh(), "nn.Tanh()"
+    if key == "gelu":
+        return nn.GELU(), "nn.GELU()"
     if key == "softmax":
         return nn.Softmax(dim=1), "nn.Softmax(dim=1)"
 

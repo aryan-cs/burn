@@ -167,7 +167,6 @@ function App() {
   const trainingMetrics = useTrainingStore((s) => s.metrics)
   const currentEpoch = useTrainingStore((s) => s.currentEpoch)
   const totalEpochs = useTrainingStore((s) => s.totalEpochs)
-  const trainingErrorMessage = useTrainingStore((s) => s.errorMessage)
   const { sendStop } = useWebSocket()
 
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null)
@@ -516,17 +515,12 @@ function App() {
 
           {activeTab === 'train' ? (
             <TrainTab
-              trainingStatus={trainingStatus}
-              trainingStatusClass={getTrainingStatusClass(trainingStatus)}
-              trainingErrorMessage={trainingErrorMessage}
-              backendMessage={backendMessage}
               trainingConfig={trainingConfig}
               isBackendBusy={isBackendBusy}
               onDatasetChange={(value) => setTrainingConfig({ dataset: value })}
               onEpochsChange={(value) => setTrainingConfig({ epochs: value })}
               onBatchSizeChange={(value) => setTrainingConfig({ batchSize: value })}
               onLearningRateChange={(value) => setTrainingConfig({ learningRate: value })}
-              trainingJobId={trainingJobId}
               currentEpoch={currentEpoch}
               totalEpochs={totalEpochs}
               latestTrainLoss={latestTrainLoss}

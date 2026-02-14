@@ -21,6 +21,10 @@ interface MetricLineChartProps {
   primaryValues: number[]
   secondaryValues: number[]
   maxValue: number
+  xAxisLabel?: string
+  yAxisLabel?: string
+  xTickStep?: number
+  yTickStep?: number
 }
 
 export function MetricLineChart({
@@ -29,6 +33,10 @@ export function MetricLineChart({
   primaryValues,
   secondaryValues,
   maxValue,
+  xAxisLabel = 'Epoch',
+  yAxisLabel = 'Value',
+  xTickStep = 0.05,
+  yTickStep = 0.05,
 }: MetricLineChartProps) {
   const valuesCount = Math.max(primaryValues.length, secondaryValues.length)
   if (valuesCount === 0) {
@@ -40,12 +48,14 @@ export function MetricLineChart({
   }
 
   const width = 330
-  const height = 140
-  const padding = { top: 12, right: 10, bottom: 20, left: 26 }
+  const height = 160
+  const padding = { top: 12, right: 10, bottom: 32, left: 38 }
   const plotWidth = width - padding.left - padding.right
   const plotHeight = height - padding.top - padding.bottom
   const xDenominator = Math.max(valuesCount - 1, 1)
   const yMax = Math.max(maxValue, 0.0001)
+  const xTicks = buildNormalizedTicks(xTickStep)
+  const yTicks = buildNormalizedTicks(yTickStep)
 
   const primaryPoints = buildChartPoints(
     primaryValues,
@@ -79,16 +89,46 @@ export function MetricLineChart({
         </span>
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} className="metric-chart-svg">
-        {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
-          const y = padding.top + tick * plotHeight
+        <line
+          x1={padding.left}
+          y1={padding.top}
+          x2={padding.left}
+          y2={padding.top + plotHeight}
+          stroke="rgba(255,255,255,0.26)"
+          strokeWidth={1}
+        />
+        <line
+          x1={padding.left}
+          y1={padding.top + plotHeight}
+          x2={padding.left + plotWidth}
+          y2={padding.top + plotHeight}
+          stroke="rgba(255,255,255,0.26)"
+          strokeWidth={1}
+        />
+        {xTicks.map((tick) => {
+          const x = padding.left + tick * plotWidth
           return (
             <line
-              key={tick}
+              key={`x-${tick}`}
+              x1={x}
+              y1={padding.top}
+              x2={x}
+              y2={padding.top + plotHeight}
+              stroke="rgba(255,255,255,0.08)"
+              strokeWidth={1}
+            />
+          )
+        })}
+        {yTicks.map((tick) => {
+          const y = padding.top + (1 - tick) * plotHeight
+          return (
+            <line
+              key={`y-${tick}`}
               x1={padding.left}
               y1={y}
               x2={padding.left + plotWidth}
               y2={y}
-              stroke="rgba(255,255,255,0.1)"
+              stroke="rgba(255,255,255,0.08)"
               strokeWidth={1}
             />
           )
@@ -109,6 +149,25 @@ export function MetricLineChart({
             strokeWidth={2}
           />
         ) : null}
+        <text
+          x={padding.left + plotWidth / 2}
+          y={height - 8}
+          textAnchor="middle"
+          fill="rgba(255,255,255,0.7)"
+          fontSize="10"
+        >
+          {xAxisLabel}
+        </text>
+        <text
+          x={14}
+          y={padding.top + plotHeight / 2}
+          textAnchor="middle"
+          fill="rgba(255,255,255,0.7)"
+          fontSize="10"
+          transform={`rotate(-90 14 ${padding.top + plotHeight / 2})`}
+        >
+          {yAxisLabel}
+        </text>
       </svg>
     </div>
   )
@@ -131,4 +190,16 @@ function buildChartPoints(
       return `${x},${y}`
     })
     .join(' ')
+}
+
+function buildNormalizedTicks(step: number): number[] {
+  const normalizedStep = Math.min(Math.max(step, 0.01), 1)
+  const ticks: number[] = []
+
+  for (let tick = 0; tick < 1; tick += normalizedStep) {
+    ticks.push(Number(tick.toFixed(4)))
+  }
+  ticks.push(1)
+
+  return ticks
 }

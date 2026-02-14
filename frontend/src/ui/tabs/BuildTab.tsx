@@ -188,8 +188,8 @@ export function BuildTab({
         <div className="summary-grid">
           <MetricTile label="Layers" value={String(layerCount)} />
           <MetricTile label="Neurons" value={String(neuronCount)} />
-          <MetricTile label="# Weights" value={String(weightCount)} />
-          <MetricTile label="# Biases" value={String(biasCount)} />
+          <MetricTile label="Weights" value={String(weightCount)} />
+          <MetricTile label="Biases" value={String(biasCount)} />
           <MetricTile label="Layer Type" value={layerTypeSummary} />
           <MetricTile
             label="Shared Activation Function"

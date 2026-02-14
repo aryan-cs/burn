@@ -8,17 +8,12 @@ interface TrainingConfigView {
 }
 
 interface TrainTabProps {
-  trainingStatus: string
-  trainingStatusClass: string
-  trainingErrorMessage: string | null
-  backendMessage: string
   trainingConfig: TrainingConfigView
   isBackendBusy: boolean
   onDatasetChange: (value: string) => void
   onEpochsChange: (value: number) => void
   onBatchSizeChange: (value: number) => void
   onLearningRateChange: (value: number) => void
-  trainingJobId: string | null
   currentEpoch: number
   totalEpochs: number
   latestTrainLoss: number | null
@@ -36,22 +31,15 @@ interface TrainTabProps {
   onTrainModel: () => void
   trainDisabled: boolean
   trainLabel: string
-  onGoToTest: () => void
-  goToTestDisabled: boolean
 }
 
 export function TrainTab({
-  trainingStatus,
-  trainingStatusClass,
-  trainingErrorMessage,
-  backendMessage,
   trainingConfig,
   isBackendBusy,
   onDatasetChange,
   onEpochsChange,
   onBatchSizeChange,
   onLearningRateChange,
-  trainingJobId,
   currentEpoch,
   totalEpochs,
   latestTrainLoss,
@@ -69,20 +57,38 @@ export function TrainTab({
   onTrainModel,
   trainDisabled,
   trainLabel,
-  onGoToTest,
-  goToTestDisabled,
 }: TrainTabProps) {
   return (
     <div className="tab-panel">
-      <section className="panel-card">
-        <div className="panel-card-header">
-          <h2 className="panel-title">Training</h2>
-          <span className={trainingStatusClass}>{trainingStatus.toUpperCase()}</span>
+      <section className="panel-card panel-card-fill">
+        <TrainGraphsBlock
+          trainAccuracySeries={trainAccuracySeries}
+          testAccuracySeries={testAccuracySeries}
+          trainLossSeries={trainLossSeries}
+          testLossSeries={testLossSeries}
+        />
+
+        <div className="summary-grid">
+          <MetricTile
+            label="Epoch"
+            value={totalEpochs > 0 ? `${currentEpoch}/${totalEpochs}` : '0/0'}
+            compact
+          />
+          <MetricTile
+            label="Train"
+            value={formatTrainMetricText(latestTrainLoss, latestTrainAccuracy)}
+            compact
+          />
+          <MetricTile
+            label="Test"
+            value={formatTrainMetricText(latestTestLoss, latestTestAccuracy)}
+            compact
+          />
         </div>
+      </section>
 
-        <p className="panel-muted-text">{trainingErrorMessage ?? backendMessage}</p>
-
-        <div className="config-grid">
+      <section className="panel-card train-settings-card">
+        <div className="config-grid train-config-grid">
           <label className="config-row">
             <span className="config-label">Dataset</span>
             <select
@@ -91,7 +97,7 @@ export function TrainTab({
               onChange={(e) => onDatasetChange(e.target.value)}
               className="config-control"
             >
-              <option value="mnist">mnist</option>
+              <option value="mnist">MNIST</option>
             </select>
           </label>
 
@@ -120,7 +126,7 @@ export function TrainTab({
           </label>
 
           <label className="config-row">
-            <span className="config-label">LR</span>
+            <span className="config-label">Learning Rate</span>
             <input
               type="number"
               min={0.000001}
@@ -134,67 +140,14 @@ export function TrainTab({
             />
           </label>
         </div>
-
-        <div className="summary-grid">
-          <MetricTile label="Job ID" value={trainingJobId ?? 'none'} compact />
-          <MetricTile
-            label="Epoch"
-            value={totalEpochs > 0 ? `${currentEpoch}/${totalEpochs}` : '0/0'}
-            compact
-          />
-          <MetricTile
-            label="Train"
-            value={
-              latestTrainLoss !== null && latestTrainAccuracy !== null
-                ? `L ${latestTrainLoss.toFixed(4)} A ${(latestTrainAccuracy * 100).toFixed(1)}%`
-                : 'n/a'
-            }
-            compact
-          />
-          <MetricTile
-            label="Test"
-            value={
-              latestTestLoss !== null && latestTestAccuracy !== null
-                ? `L ${latestTestLoss.toFixed(4)} A ${(latestTestAccuracy * 100).toFixed(1)}%`
-                : 'n/a'
-            }
-            compact
-          />
-        </div>
       </section>
 
-      <section className="panel-card">
-        <h2 className="panel-title">Loss</h2>
-        <div className="panel-chart">
-          <MetricLineChart
-            primaryLabel="Train Loss"
-            secondaryLabel="Test Loss"
-            primaryValues={trainLossSeries}
-            secondaryValues={testLossSeries}
-            maxValue={Math.max(...trainLossSeries, ...testLossSeries, 0.01)}
-          />
-        </div>
-      </section>
-
-      <section className="panel-card">
-        <h2 className="panel-title">Accuracy</h2>
-        <div className="panel-chart">
-          <MetricLineChart
-            primaryLabel="Train Acc"
-            secondaryLabel="Test Acc"
-            primaryValues={trainAccuracySeries}
-            secondaryValues={testAccuracySeries}
-            maxValue={1}
-          />
-        </div>
-      </section>
-
-      <div className="panel-actions panel-actions-split">
+      <div className="panel-actions">
         {isTraining ? (
           <button
             onClick={onStopModel}
             disabled={stopDisabled}
-            className="btn btn-danger"
+            className="btn btn-validate btn-danger"
           >
             {stopLabel}
           </button>
@@ -202,19 +155,74 @@ export function TrainTab({
           <button
             onClick={onTrainModel}
             disabled={trainDisabled}
-            className="btn btn-success"
+            className="btn btn-validate"
           >
             {trainLabel}
           </button>
         )}
-        <button
-          onClick={onGoToTest}
-          disabled={goToTestDisabled}
-          className="btn btn-indigo"
-        >
-          Go To Test
-        </button>
       </div>
     </div>
   )
+}
+
+interface TrainGraphsBlockProps {
+  trainLossSeries: number[]
+  testLossSeries: number[]
+  trainAccuracySeries: number[]
+  testAccuracySeries: number[]
+}
+
+function TrainGraphsBlock({
+  trainLossSeries,
+  testLossSeries,
+  trainAccuracySeries,
+  testAccuracySeries,
+}: TrainGraphsBlockProps) {
+  return (
+    <div className="train-graphs train-graph-block">
+      <div>
+        <h3 className="panel-subtitle">Accuracy</h3>
+        <div className="panel-chart">
+          <MetricLineChart
+            primaryLabel="Train Acc"
+            secondaryLabel="Test Acc"
+            primaryValues={trainAccuracySeries}
+            secondaryValues={testAccuracySeries}
+            maxValue={1}
+            xAxisLabel="Epoch"
+            yAxisLabel="Accuracy (%)"
+            xTickStep={0.05}
+            yTickStep={0.05}
+          />
+        </div>
+      </div>
+
+      <div>
+        <h3 className="panel-subtitle">Loss</h3>
+        <div className="panel-chart">
+          <MetricLineChart
+            primaryLabel="Train Loss"
+            secondaryLabel="Test Loss"
+            primaryValues={trainLossSeries}
+            secondaryValues={testLossSeries}
+            maxValue={Math.max(...trainLossSeries, ...testLossSeries, 0.01)}
+            xAxisLabel="Epoch"
+            yAxisLabel="Loss"
+            xTickStep={0.05}
+            yTickStep={0.05}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function formatTrainMetricText(
+  loss: number | null,
+  accuracy: number | null
+): string {
+  if (loss === null || accuracy === null) {
+    return 'N/A'
+  }
+  return `${(loss * 100).toFixed(2)}% Loss, ${(accuracy * 100).toFixed(1)}% Up`
 }

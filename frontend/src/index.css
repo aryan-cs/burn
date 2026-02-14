@@ -14,5 +14,8 @@ body,
   overflow: hidden;
   background-color: #0a0a0f;
   color: #e0e0e0;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: "Space Grotesk", sans-serif;
+  font-optical-sizing: auto;
+  font-weight: 400;
+  font-style: normal;
 }

@@ -1,146 +1,218 @@
-import { useRef, useState } from 'react'
+/* eslint-disable react-refresh/only-export-components */
+import { useMemo, useRef, useState } from 'react'
 import type { ThreeEvent } from '@react-three/fiber'
-import { Text } from '@react-three/drei'
 import * as THREE from 'three'
-import { useGraphStore, type LayerNode, type LayerType } from '../../store/graphStore'
-import { PortMesh } from './PortMesh'
-import { DragControls } from '../controls/DragControls'
+import { useGraphStore, type LayerNode } from '../../store/graphStore'
+import {
+  LAYER_NODE_RADIUS,
+  buildLayerLocalNodePositions,
+  getLayerGridSize,
+} from '../../utils/layerLayout'
 
-// ── Visual mapping ─────────────────────────────────────
+export type LayerRole = 'input' | 'hidden' | 'output'
 
-const LAYER_COLORS: Record<LayerType, string> = {
-  Input: '#4A4A4A',
-  Dense: '#4A90D9',
-  Conv2D: '#7B61FF',
-  MaxPool2D: '#50E3C2',
-  LSTM: '#F5A623',
-  GRU: '#F5A623',
-  Dropout: '#9B9B9B',
-  BatchNorm: '#9B9B9B',
-  Flatten: '#50E3C2',
-  Reshape: '#50E3C2',
-  Output: '#D0021B',
+export const DRAG_MOUSE_BUTTON = 0
+
+export const NODE_SPHERE_WIDTH_SEGMENTS = 20
+export const NODE_SPHERE_HEIGHT_SEGMENTS = 20
+
+export const NODE_CORE_COLOR = '#6e6e6e'
+export const NODE_CORE_EMISSIVE_COLOR = '#1a1a1a'
+export const NODE_CORE_EMISSIVE_INTENSITY_ACTIVE = 0.5
+export const NODE_CORE_EMISSIVE_INTENSITY_IDLE = 0.3
+export const NODE_CORE_ROUGHNESS = 0.55
+export const NODE_CORE_METALNESS = 0.1
+
+export const NODE_OUTLINE_SCALE = 1.22
+export const NODE_OUTLINE_OPACITY_SOURCE = 0.95
+export const NODE_OUTLINE_OPACITY_SELECTED = 1
+export const NODE_OUTLINE_OPACITY_HIGHLIGHTED = 0.9
+export const NODE_OUTLINE_OPACITY_HOVERED = 0.7
+export const NODE_OUTLINE_OPACITY_IDLE = 0.6
+export const NODE_OUTLINE_SIDE = THREE.BackSide
+export const NODE_OUTLINE_DEPTH_WRITE = false
+
+export const LAYER_ROLE_COLORS: Record<LayerRole, string> = {
+  input: '#ff8c2b',
+  hidden: '#ffffff',
+  output: '#4da3ff',
 }
 
-const LAYER_SIZES: Record<LayerType, [number, number, number]> = {
-  Input: [1.8, 0.2, 1.2],
-  Dense: [1.6, 1.0, 1.0],
-  Conv2D: [2.0, 0.6, 1.4],
-  MaxPool2D: [1.4, 0.6, 1.0],
-  LSTM: [1.4, 1.4, 1.4],
-  GRU: [1.4, 1.4, 1.4],
-  Dropout: [1.2, 0.8, 1.0],
-  BatchNorm: [1.2, 0.8, 1.0],
-  Flatten: [1.6, 0.3, 0.8],
-  Reshape: [1.6, 0.3, 0.8],
-  Output: [1.4, 1.2, 1.0],
-}
+export const IGNORE_RAYCAST: THREE.Mesh['raycast'] = () => undefined
 
-export function LayerNode3D({ node }: { node: LayerNode }) {
-  const meshRef = useRef<THREE.Mesh>(null)
+export function LayerNode3D({ node, role }: { node: LayerNode; role: LayerRole }) {
   const [hovered, setHovered] = useState(false)
+  const isMovingRef = useRef(false)
+  const dragDistanceRef = useRef(0)
+  const dragOffsetRef = useRef(new THREE.Vector3())
+  const draggedNodeIdsRef = useRef<string[]>([])
+  const dragStartPositionsRef = useRef<Record<string, THREE.Vector3>>({})
+  const primaryDragStartPositionRef = useRef(new THREE.Vector3())
+  const hasRecordedMoveHistoryRef = useRef(false)
+
   const selectedNodeId = useGraphStore((s) => s.selectedNodeId)
+  const draggingNodeId = useGraphStore((s) => s.draggingNodeId)
+  const highlightedNodeIds = useGraphStore((s) => s.highlightedNodeIds)
+  const connectionSource = useGraphStore((s) => s.connectionSource)
   const selectNode = useGraphStore((s) => s.selectNode)
-  const setConnectionSource = useGraphStore((s) => s.setConnectionSource)
+  const setDraggingNodeId = useGraphStore((s) => s.setDraggingNodeId)
+  const setNodesPosition = useGraphStore((s) => s.setNodesPosition)
+  const startConnectionDrag = useGraphStore((s) => s.startConnectionDrag)
 
   const isSelected = selectedNodeId === node.id
-  const color = LAYER_COLORS[node.type]
-  const size = LAYER_SIZES[node.type]
+  const isDragging = draggingNodeId === node.id
+  const isHighlighted = highlightedNodeIds.includes(node.id)
+  const isConnectionSource = connectionSource === node.id
+  const isConnectionTarget = connectionSource !== null && connectionSource !== node.id
 
-  const handleClick = (e: ThreeEvent<MouseEvent>) => {
+  const { rows, cols } = getLayerGridSize(node.config)
+  const nodePositions = useMemo(() => buildLayerLocalNodePositions(rows, cols), [rows, cols])
+  const baseColor = getLayerColor(role)
+  const outlineOpacity = isConnectionSource
+    ? NODE_OUTLINE_OPACITY_SOURCE
+    : isSelected || isDragging
+      ? NODE_OUTLINE_OPACITY_SELECTED
+      : isHighlighted
+        ? NODE_OUTLINE_OPACITY_HIGHLIGHTED
+      : hovered || isConnectionTarget
+        ? NODE_OUTLINE_OPACITY_HOVERED
+        : NODE_OUTLINE_OPACITY_IDLE
+
+  const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
+    if (e.button !== DRAG_MOUSE_BUTTON) return
+    if (e.shiftKey) return
     e.stopPropagation()
+    e.nativeEvent.preventDefault()
+    e.nativeEvent.stopImmediatePropagation?.()
     selectNode(node.id)
+
+    if (e.ctrlKey) {
+      startConnectionDrag(node.id, [e.point.x, e.point.y, e.point.z])
+      return
+    }
+
+    isMovingRef.current = true
+    hasRecordedMoveHistoryRef.current = false
+    setDraggingNodeId(node.id)
+    ;(e.target as HTMLElement)?.setPointerCapture?.(e.pointerId)
+
+    const dragNodeIds = highlightedNodeIds.includes(node.id)
+      ? highlightedNodeIds
+      : [node.id]
+    const currentNodes = useGraphStore.getState().nodes
+    const startPositions: Record<string, THREE.Vector3> = {}
+    dragNodeIds.forEach((dragNodeId) => {
+      const dragNode = currentNodes[dragNodeId]
+      if (dragNode) {
+        startPositions[dragNodeId] = new THREE.Vector3(...dragNode.position)
+      }
+    })
+    if (!startPositions[node.id]) {
+      startPositions[node.id] = new THREE.Vector3(...node.position)
+    }
+    draggedNodeIdsRef.current = Object.keys(startPositions)
+    dragStartPositionsRef.current = startPositions
+    primaryDragStartPositionRef.current.copy(startPositions[node.id])
+
+    dragDistanceRef.current = primaryDragStartPositionRef.current.distanceTo(e.ray.origin)
+
+    const intersection = new THREE.Vector3()
+      .copy(e.ray.direction)
+      .multiplyScalar(dragDistanceRef.current)
+      .add(e.ray.origin)
+    dragOffsetRef.current.copy(primaryDragStartPositionRef.current).sub(intersection)
   }
 
-  const configSummary = getConfigSummary(node)
+  const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
+    if (!isMovingRef.current) return
+    e.stopPropagation()
+    e.nativeEvent.preventDefault()
+
+    const intersection = new THREE.Vector3()
+      .copy(e.ray.direction)
+      .multiplyScalar(dragDistanceRef.current)
+      .add(e.ray.origin)
+    const nextPrimaryPosition = intersection.add(dragOffsetRef.current)
+    const delta = new THREE.Vector3().copy(nextPrimaryPosition).sub(primaryDragStartPositionRef.current)
+    const nextPositions: Record<string, [number, number, number]> = {}
+
+    draggedNodeIdsRef.current.forEach((dragNodeId) => {
+      const startPosition = dragStartPositionsRef.current[dragNodeId]
+      if (!startPosition) return
+      nextPositions[dragNodeId] = [
+        startPosition.x + delta.x,
+        startPosition.y + delta.y,
+        startPosition.z + delta.z,
+      ]
+    })
+
+    const shouldRecordHistory = !hasRecordedMoveHistoryRef.current
+    setNodesPosition(nextPositions, shouldRecordHistory)
+    hasRecordedMoveHistoryRef.current = true
+  }
+
+  const handlePointerUp = (e: ThreeEvent<PointerEvent>) => {
+    if (!isMovingRef.current) return
+    e.stopPropagation()
+    e.nativeEvent.preventDefault()
+    isMovingRef.current = false
+    setDraggingNodeId(null)
+    draggedNodeIdsRef.current = []
+    dragStartPositionsRef.current = {}
+    hasRecordedMoveHistoryRef.current = false
+    ;(e.target as HTMLElement)?.releasePointerCapture?.(e.pointerId)
+  }
 
   return (
-    <DragControls nodeId={node.id} position={node.position}>
-      <group>
-        {/* Main body */}
-        <mesh
-          ref={meshRef}
-          onClick={handleClick}
-          onPointerOver={() => setHovered(true)}
-          onPointerOut={() => setHovered(false)}
-        >
-          <boxGeometry args={size} />
-          <meshStandardMaterial
-            color={color}
-            transparent
-            opacity={node.type === 'Dropout' ? 0.5 : 0.85}
-            emissive={isSelected ? color : hovered ? color : '#000000'}
-            emissiveIntensity={isSelected ? 0.4 : hovered ? 0.2 : 0}
-          />
-        </mesh>
-
-        {/* Selection outline */}
-        {isSelected && (
-          <mesh>
-            <boxGeometry args={[size[0] + 0.08, size[1] + 0.08, size[2] + 0.08]} />
-            <meshBasicMaterial color="#ffffff" wireframe />
-          </mesh>
-        )}
-
-        {/* Label */}
-        <Text
-          position={[0, size[1] / 2 + 0.3, 0]}
-          fontSize={0.25}
-          color="#ffffff"
-          anchorX="center"
-          anchorY="bottom"
-          font={undefined}
-        >
-          {node.type}
-        </Text>
-
-        {/* Config summary */}
-        {configSummary && (
-          <Text
-            position={[0, -size[1] / 2 - 0.2, 0]}
-            fontSize={0.16}
-            color="#aaaaaa"
-            anchorX="center"
-            anchorY="top"
-            font={undefined}
+    <group position={node.position}>
+      {nodePositions.map((position, index) => (
+        <group key={`${node.id}-${index}`} position={position}>
+          <mesh
+            userData={{ layerId: node.id }}
+            onPointerDown={handlePointerDown}
+            onPointerOver={() => setHovered(true)}
+            onPointerOut={() => setHovered(false)}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
           >
-            {configSummary}
-          </Text>
-        )}
+            <sphereGeometry
+              args={[LAYER_NODE_RADIUS, NODE_SPHERE_WIDTH_SEGMENTS, NODE_SPHERE_HEIGHT_SEGMENTS]}
+            />
+            <meshStandardMaterial
+              color={NODE_CORE_COLOR}
+              emissive={NODE_CORE_EMISSIVE_COLOR}
+              emissiveIntensity={
+                isSelected || isDragging || isHighlighted || hovered
+                  ? NODE_CORE_EMISSIVE_INTENSITY_ACTIVE
+                  : NODE_CORE_EMISSIVE_INTENSITY_IDLE
+              }
+              roughness={NODE_CORE_ROUGHNESS}
+              metalness={NODE_CORE_METALNESS}
+            />
+          </mesh>
 
-        {/* Ports */}
-        <PortMesh
-          nodeId={node.id}
-          type="input"
-          position={[-size[0] / 2 - 0.15, 0, 0]}
-        />
-        <PortMesh
-          nodeId={node.id}
-          type="output"
-          position={[size[0] / 2 + 0.15, 0, 0]}
-          onConnect={() => setConnectionSource(node.id)}
-        />
-      </group>
-    </DragControls>
+          <mesh
+            raycast={IGNORE_RAYCAST}
+            scale={[NODE_OUTLINE_SCALE, NODE_OUTLINE_SCALE, NODE_OUTLINE_SCALE]}
+          >
+            <sphereGeometry
+              args={[LAYER_NODE_RADIUS, NODE_SPHERE_WIDTH_SEGMENTS, NODE_SPHERE_HEIGHT_SEGMENTS]}
+            />
+            <meshBasicMaterial
+              color={baseColor}
+              transparent
+              opacity={outlineOpacity}
+              side={NODE_OUTLINE_SIDE}
+              depthWrite={NODE_OUTLINE_DEPTH_WRITE}
+            />
+          </mesh>
+        </group>
+      ))}
+    </group>
   )
 }
 
-function getConfigSummary(node: LayerNode): string {
-  const c = node.config
-  switch (node.type) {
-    case 'Dense':
-      return `${c.units} units, ${c.activation}`
-    case 'Conv2D':
-      return `${c.filters}f, ${c.kernel_size}x${c.kernel_size}`
-    case 'Dropout':
-      return `rate=${c.rate}`
-    case 'Input':
-      return c.shape ? `shape=[${c.shape.join(',')}]` : ''
-    case 'Output':
-      return `${c.num_classes} classes`
-    case 'MaxPool2D':
-      return `${c.kernel_size}x${c.kernel_size}`
-    default:
-      return ''
-  }
+function getLayerColor(role: LayerRole): string {
+  return LAYER_ROLE_COLORS[role]
 }

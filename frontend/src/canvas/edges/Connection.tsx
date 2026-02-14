@@ -1,48 +1,35 @@
 import { useMemo } from 'react'
-import * as THREE from 'three'
-import type { Edge } from '../../store/graphStore'
-import { weightToColor, weightToThickness } from '../../utils/colorScale'
+import type { LayerNode } from '../../store/graphStore'
+import { buildLayerWorldNodePositions } from '../../utils/layerLayout'
 
 interface ConnectionProps {
-  edge: Edge
-  sourcePos: [number, number, number]
-  targetPos: [number, number, number]
+  sourceNode: LayerNode
+  targetNode: LayerNode
 }
 
-export function Connection({ edge, sourcePos, targetPos }: ConnectionProps) {
-  const { curve, color, thickness } = useMemo(() => {
-    const src = new THREE.Vector3(...sourcePos)
-    const tgt = new THREE.Vector3(...targetPos)
-    const mid = new THREE.Vector3().lerpVectors(src, tgt, 0.5)
-    // Slight upward arc
-    mid.y += 0.5
+export function Connection({ sourceNode, targetNode }: ConnectionProps) {
+  const segmentPositions = useMemo(() => {
+    const sourcePoints = buildLayerWorldNodePositions(sourceNode)
+    const targetPoints = buildLayerWorldNodePositions(targetNode)
+    const values: number[] = []
 
-    const c = new THREE.QuadraticBezierCurve3(src, mid, tgt)
+    for (const source of sourcePoints) {
+      for (const target of targetPoints) {
+        values.push(source[0], source[1], source[2], target[0], target[1], target[2])
+      }
+    }
 
-    const col = edge.weightStats
-      ? weightToColor(edge.weightStats.mean)
-      : '#4A90D9'
+    return new Float32Array(values)
+  }, [sourceNode, targetNode])
 
-    const thick = edge.weightStats
-      ? weightToThickness(edge.weightStats.mean)
-      : 0.04
-
-    return { curve: c, color: col, thickness: thick }
-  }, [sourcePos, targetPos, edge.weightStats])
-
-  const tubeGeometry = useMemo(() => {
-    return new THREE.TubeGeometry(curve, 32, thickness, 8, false)
-  }, [curve, thickness])
+  if (segmentPositions.length === 0) return null
 
   return (
-    <mesh geometry={tubeGeometry}>
-      <meshStandardMaterial
-        color={color}
-        transparent
-        opacity={0.7}
-        emissive={color}
-        emissiveIntensity={0.3}
-      />
-    </mesh>
+    <lineSegments>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[segmentPositions, 3]} />
+      </bufferGeometry>
+      <lineBasicMaterial color="#525252" transparent opacity={0.38} />
+    </lineSegments>
   )
 }

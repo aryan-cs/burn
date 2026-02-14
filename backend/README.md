@@ -19,6 +19,17 @@ uv run python main.py
 
 `python main.py` runs with `reload=False`, which avoids in-memory job loss during dataset downloads/training.
 
+## Run Node Worker (independent process)
+
+```bash
+cd /Users/yax/programming/burn
+JETSON_PASS=jetson uv run --project backend python -m uvicorn gpu_node.main:app --host 0.0.0.0 --port 8001
+# or
+JETSON_PASS=jetson uv run --project backend python -m gpu_node.main
+```
+
+Use this on the remote Jetson machine from the repo root. The main backend then calls this worker using `JETSON_HOST`, `JETSON_PORT`, and `JETSON_PASS`.
+
 ## API Client Script
 
 ```bash

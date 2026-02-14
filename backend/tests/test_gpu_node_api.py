@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from jetson_worker.core.job_registry import remote_job_registry
-from jetson_worker.main import app
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from gpu_node.core.job_registry import remote_job_registry
+from gpu_node.main import app
 from tests.conftest import build_graph_payload
 
 
-def test_jetson_worker_requires_token(monkeypatch) -> None:
+def test_gpu_node_requires_token(monkeypatch) -> None:
     remote_job_registry.clear()
     monkeypatch.setenv("JETSON_PASS", "jetson")
     with TestClient(app) as client:
@@ -20,7 +23,7 @@ def test_jetson_worker_requires_token(monkeypatch) -> None:
     remote_job_registry.clear()
 
 
-def test_jetson_worker_train_events_and_artifact(monkeypatch, tmp_path) -> None:
+def test_gpu_node_train_events_and_artifact(monkeypatch, tmp_path) -> None:
     remote_job_registry.clear()
     monkeypatch.setenv("JETSON_PASS", "jetson")
 
@@ -29,7 +32,7 @@ def test_jetson_worker_train_events_and_artifact(monkeypatch, tmp_path) -> None:
         assert entry is not None
         remote_job_registry.set_status(job_id, "running")
         artifact = Path(tmp_path) / f"{job_id}.pt"
-        artifact.write_bytes(b"jetson-model")
+        artifact.write_bytes(b"gpu-node-model")
         await remote_job_registry.publish(
             job_id,
             {
@@ -55,7 +58,7 @@ def test_jetson_worker_train_events_and_artifact(monkeypatch, tmp_path) -> None:
         )
         await remote_job_registry.mark_terminal(job_id, "completed", artifact_path=artifact)
 
-    monkeypatch.setattr("jetson_worker.routers.training.run_training_job", fake_run_training_job)
+    monkeypatch.setattr("gpu_node.routers.training.run_training_job", fake_run_training_job)
 
     with TestClient(app) as client:
         headers = {"X-Jetson-Token": "jetson"}
@@ -73,12 +76,12 @@ def test_jetson_worker_train_events_and_artifact(monkeypatch, tmp_path) -> None:
 
         artifact_res = client.get(f"/jobs/{job_id}/artifact", headers=headers)
         assert artifact_res.status_code == 200
-        assert artifact_res.content == b"jetson-model"
+        assert artifact_res.content == b"gpu-node-model"
 
     remote_job_registry.clear()
 
 
-def test_jetson_worker_stop(monkeypatch) -> None:
+def test_gpu_node_stop(monkeypatch) -> None:
     remote_job_registry.clear()
     monkeypatch.setenv("JETSON_PASS", "")
 
@@ -88,7 +91,7 @@ def test_jetson_worker_stop(monkeypatch) -> None:
             await asyncio.sleep(0.2)
             await remote_job_registry.mark_terminal(job_id, "stopped")
 
-        monkeypatch.setattr("jetson_worker.routers.training.run_training_job", fake_run_training_job)
+        monkeypatch.setattr("gpu_node.routers.training.run_training_job", fake_run_training_job)
         train_res = client.post("/train", json=build_graph_payload())
         assert train_res.status_code == 200
         job_id = train_res.json()["job_id"]

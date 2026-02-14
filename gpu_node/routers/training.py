@@ -8,14 +8,18 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 
+from gpu_node.bootstrap import ensure_backend_path
+from gpu_node.core.job_registry import remote_job_registry
+from gpu_node.core.training_engine import run_training_job
+
+ensure_backend_path()
+
 from core.graph_compiler import GraphCompileError, compile_graph
-from jetson_worker.core.job_registry import remote_job_registry
-from jetson_worker.core.training_engine import run_training_job
 from models.graph_schema import GraphSpec
 from models.training_config import normalize_training_config
 
 
-router = APIRouter(tags=["jetson-training"])
+router = APIRouter(tags=["gpu-node-training"])
 ARTIFACTS_DIR = Path(__file__).resolve().parents[1] / "artifacts"
 TOKEN_HEADER = "X-Jetson-Token"
 

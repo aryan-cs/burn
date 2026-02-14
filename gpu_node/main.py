@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from jetson_worker.routers.training import router as training_router
+from gpu_node.routers.training import router as training_router
 
 
 @asynccontextmanager
@@ -15,7 +15,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="MLCanvas Jetson Worker", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="MLCanvas GPU Node", version="0.1.0", lifespan=lifespan)
 app.include_router(training_router)
 
 
@@ -27,4 +27,4 @@ async def health() -> dict[str, str]:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("jetson_worker.main:app", host="0.0.0.0", port=8001, reload=False)
+    uvicorn.run("gpu_node.main:app", host="0.0.0.0", port=8001, reload=False)

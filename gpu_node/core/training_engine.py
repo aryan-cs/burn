@@ -6,10 +6,14 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
+from gpu_node.bootstrap import ensure_backend_path
+from gpu_node.core.job_registry import remote_job_registry
+
+ensure_backend_path()
+
 from core.graph_compiler import CompiledGraphResult
 from core.weight_extractor import extract_weight_snapshot
 from datasets.loader import get_mnist_dataloaders
-from jetson_worker.core.job_registry import remote_job_registry
 from models.training_config import TrainingConfig
 
 

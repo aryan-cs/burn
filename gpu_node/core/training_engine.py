@@ -6,15 +6,20 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-from gpu_node.bootstrap import ensure_backend_path
-from gpu_node.core.job_registry import remote_job_registry
-
-ensure_backend_path()
-
-from core.graph_compiler import CompiledGraphResult
-from core.weight_extractor import extract_weight_snapshot
-from datasets.loader import get_mnist_dataloaders
-from models.training_config import TrainingConfig
+try:
+    # Package mode: python -m gpu_node.main
+    from gpu_node.core.job_registry import remote_job_registry
+    from gpu_node.core.graph_compiler import CompiledGraphResult
+    from gpu_node.core.weight_extractor import extract_weight_snapshot
+    from gpu_node.datasets.loader import get_mnist_dataloaders
+    from gpu_node.models.training_config import TrainingConfig
+except ModuleNotFoundError:
+    # Script mode: python main.py from gpu_node/
+    from core.job_registry import remote_job_registry
+    from core.graph_compiler import CompiledGraphResult
+    from core.weight_extractor import extract_weight_snapshot
+    from datasets.loader import get_mnist_dataloaders
+    from models.training_config import TrainingConfig
 
 
 def _build_optimizer(model: nn.Module, training: TrainingConfig) -> torch.optim.Optimizer:

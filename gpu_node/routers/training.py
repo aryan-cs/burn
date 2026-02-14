@@ -3,25 +3,54 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from gpu_node.bootstrap import ensure_backend_path
-from gpu_node.core.job_registry import remote_job_registry
-from gpu_node.core.training_engine import run_training_job
-
-ensure_backend_path()
-
-from core.graph_compiler import GraphCompileError, compile_graph
-from models.graph_schema import GraphSpec
-from models.training_config import normalize_training_config
+try:
+    # Package mode: python -m gpu_node.main
+    from gpu_node.core.job_registry import remote_job_registry
+    from gpu_node.models.graph_schema import GraphSpec
+    from gpu_node.models.training_config import normalize_training_config
+except ModuleNotFoundError:
+    # Script mode: python main.py from gpu_node/
+    from core.job_registry import remote_job_registry
+    from models.graph_schema import GraphSpec
+    from models.training_config import normalize_training_config
 
 
 router = APIRouter(tags=["gpu-node-training"])
 ARTIFACTS_DIR = Path(__file__).resolve().parents[1] / "artifacts"
 TOKEN_HEADER = "X-Jetson-Token"
+
+
+def _lazy_load_training_stack() -> tuple[Any, Any, Any]:
+    """
+    Delay torch-dependent imports until a training request arrives.
+    This allows the API process to boot and expose /health even when
+    CUDA runtime libs are missing.
+    """
+    try:
+        try:
+            from gpu_node.core.graph_compiler import GraphCompileError, compile_graph
+            from gpu_node.core.training_engine import run_training_job
+        except ModuleNotFoundError:
+            from core.graph_compiler import GraphCompileError, compile_graph
+            from core.training_engine import run_training_job
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": (
+                    "GPU runtime is unavailable on this node. "
+                    "Install Jetson CUDA runtime libs (missing libcusparseLt.so.0) and retry."
+                ),
+                "error": str(exc),
+            },
+        ) from exc
+
+    return GraphCompileError, compile_graph, run_training_job
 
 
 def _auth_required(
@@ -36,6 +65,7 @@ def _auth_required(
 
 @router.post("/train", dependencies=[Depends(_auth_required)])
 async def start_training(graph: GraphSpec) -> dict[str, str]:
+    GraphCompileError, compile_graph, run_training_job = _lazy_load_training_stack()
     training = normalize_training_config(graph.training)
     try:
         compiled = compile_graph(graph, training)

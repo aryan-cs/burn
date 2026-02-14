@@ -5,7 +5,12 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from gpu_node.routers.training import router as training_router
+try:
+    # Package mode: python -m gpu_node.main
+    from gpu_node.routers.training import router as training_router
+except ModuleNotFoundError:
+    # Script mode: python main.py from gpu_node/
+    from routers.training import router as training_router
 
 
 @asynccontextmanager
@@ -27,4 +32,4 @@ async def health() -> dict[str, str]:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("gpu_node.main:app", host="0.0.0.0", port=8001, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=8001, reload=False)

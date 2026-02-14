@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { getNeuralNetworkOrder } from '../utils/graphOrder'
 
 // ── Types ──────────────────────────────────────────────
 
@@ -150,6 +151,7 @@ interface GraphState {
   updateConnectionCursor: (point: [number, number, number]) => void
   completeConnectionDrag: (targetId: string | null) => void
   cancelConnectionDrag: () => void
+  normalizeSequentialEdges: () => void
   undo: () => boolean
 
   toJSON: () => GraphJSON
@@ -250,6 +252,159 @@ function isSamePosition(
     current[1] === next[1] &&
     current[2] === next[2]
   )
+}
+
+function hasPathInAdjacency(
+  adjacency: Map<string, string[]>,
+  startNodeId: string,
+  targetNodeId: string
+): boolean {
+  if (startNodeId === targetNodeId) return true
+
+  const queue = [startNodeId]
+  const visited = new Set<string>([startNodeId])
+
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const currentNodeId = queue[cursor]
+    const neighbors = adjacency.get(currentNodeId) ?? []
+    for (const neighborId of neighbors) {
+      if (neighborId === targetNodeId) {
+        return true
+      }
+      if (visited.has(neighborId)) continue
+      visited.add(neighborId)
+      queue.push(neighborId)
+    }
+  }
+
+  return false
+}
+
+function buildAdjacencyFromEdges(
+  edges: Record<string, Edge>
+): Map<string, string[]> {
+  const adjacency = new Map<string, string[]>()
+  Object.values(edges).forEach((edge) => {
+    const outgoing = adjacency.get(edge.source)
+    if (outgoing) {
+      outgoing.push(edge.target)
+    } else {
+      adjacency.set(edge.source, [edge.target])
+    }
+  })
+  return adjacency
+}
+
+function canAddSequentialEdge(
+  nodes: Record<string, LayerNode>,
+  edges: Record<string, Edge>,
+  sourceId: string,
+  targetId: string
+): boolean {
+  if (!nodes[sourceId] || !nodes[targetId]) return false
+  if (sourceId === targetId) return false
+
+  let outgoingCount = 0
+  let incomingCount = 0
+  for (const edge of Object.values(edges)) {
+    if (!nodes[edge.source] || !nodes[edge.target]) continue
+    if (edge.source === sourceId) {
+      outgoingCount += 1
+    }
+    if (edge.target === targetId) {
+      incomingCount += 1
+    }
+  }
+  if (outgoingCount > 0 || incomingCount > 0) return false
+
+  const adjacency = buildAdjacencyFromEdges(edges)
+  if (hasPathInAdjacency(adjacency, targetId, sourceId)) {
+    return false
+  }
+
+  return true
+}
+
+function compareEdgeByNodeOrder(
+  edgeA: Edge,
+  edgeB: Edge,
+  orderIndex: Map<string, number>
+): number {
+  const sourceOrderA = orderIndex.get(edgeA.source) ?? Number.MAX_SAFE_INTEGER
+  const sourceOrderB = orderIndex.get(edgeB.source) ?? Number.MAX_SAFE_INTEGER
+  if (sourceOrderA !== sourceOrderB) {
+    return sourceOrderA - sourceOrderB
+  }
+
+  const targetOrderA = orderIndex.get(edgeA.target) ?? Number.MAX_SAFE_INTEGER
+  const targetOrderB = orderIndex.get(edgeB.target) ?? Number.MAX_SAFE_INTEGER
+  if (targetOrderA !== targetOrderB) {
+    return targetOrderA - targetOrderB
+  }
+
+  return edgeA.id.localeCompare(edgeB.id)
+}
+
+function normalizeToSequentialEdges(
+  nodes: Record<string, LayerNode>,
+  edges: Record<string, Edge>
+): Record<string, Edge> {
+  const orderedNodeIds = getNeuralNetworkOrder(nodes, edges)
+  const orderIndex = new Map<string, number>()
+  orderedNodeIds.forEach((nodeId, index) => {
+    orderIndex.set(nodeId, index)
+  })
+
+  const pairSeen = new Set<string>()
+  const candidates = Object.values(edges)
+    .filter((edge) => Boolean(nodes[edge.source]) && Boolean(nodes[edge.target]))
+    .filter((edge) => edge.source !== edge.target)
+    .filter((edge) => {
+      const pair = `${edge.source}->${edge.target}`
+      if (pairSeen.has(pair)) return false
+      pairSeen.add(pair)
+      return true
+    })
+    .sort((edgeA, edgeB) => compareEdgeByNodeOrder(edgeA, edgeB, orderIndex))
+
+  const normalized: Record<string, Edge> = {}
+  const sourceUsed = new Set<string>()
+  const targetUsed = new Set<string>()
+  const adjacency = new Map<string, string[]>()
+  Object.keys(nodes).forEach((nodeId) => {
+    adjacency.set(nodeId, [])
+  })
+
+  candidates.forEach((edge) => {
+    if (sourceUsed.has(edge.source) || targetUsed.has(edge.target)) return
+    if (hasPathInAdjacency(adjacency, edge.target, edge.source)) return
+
+    normalized[edge.id] = edge
+    sourceUsed.add(edge.source)
+    targetUsed.add(edge.target)
+    adjacency.get(edge.source)?.push(edge.target)
+  })
+
+  return normalized
+}
+
+function areEdgeSetsEqual(
+  left: Record<string, Edge>,
+  right: Record<string, Edge>
+): boolean {
+  const leftEdgeIds = Object.keys(left)
+  const rightEdgeIds = Object.keys(right)
+  if (leftEdgeIds.length !== rightEdgeIds.length) return false
+
+  for (const edgeId of leftEdgeIds) {
+    const leftEdge = left[edgeId]
+    const rightEdge = right[edgeId]
+    if (!rightEdge) return false
+    if (leftEdge.source !== rightEdge.source) return false
+    if (leftEdge.target !== rightEdge.target) return false
+  }
+
+  return true
 }
 
 export const useGraphStore = create<GraphState>((set, get) => ({
@@ -440,13 +595,21 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   },
 
   addEdge: (sourceId, targetId) => {
+    const state = get()
+    if (!state.nodes[sourceId] || !state.nodes[targetId]) return ''
+    if (sourceId === targetId) return ''
+
     // Prevent duplicate edges
-    const existing = Object.values(get().edges).find(
+    const existing = Object.values(state.edges).find(
       (e) => e.source === sourceId && e.target === targetId
     )
     if (existing) return existing.id
 
-    pushUndoSnapshot(get())
+    if (!canAddSequentialEdge(state.nodes, state.edges, sourceId, targetId)) {
+      return ''
+    }
+
+    pushUndoSnapshot(state)
     const id = `edge_${nextEdgeId++}`
     const edge: Edge = { id, source: sourceId, target: targetId }
     set((s) => ({ edges: { ...s.edges, [id]: edge } }))
@@ -535,6 +698,21 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       connectionCursor: null,
     }),
 
+  normalizeSequentialEdges: () => {
+    const state = get()
+    const normalizedEdges = normalizeToSequentialEdges(state.nodes, state.edges)
+    if (areEdgeSetsEqual(state.edges, normalizedEdges)) return
+
+    pushUndoSnapshot(state)
+    set((s) => ({
+      edges: normalizedEdges,
+      selectedEdgeId:
+        s.selectedEdgeId && normalizedEdges[s.selectedEdgeId]
+          ? s.selectedEdgeId
+          : null,
+    }))
+  },
+
   toJSON: () => {
     const { nodes, edges } = get()
     return {
@@ -573,10 +751,10 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       }
     })
 
-    const edges: Record<string, Edge> = {}
+    const parsedEdges: Record<string, Edge> = {}
     let maxEdgeNum = 0
     json.edges.forEach((e) => {
-      edges[e.id] = { id: e.id, source: e.source, target: e.target }
+      parsedEdges[e.id] = { id: e.id, source: e.source, target: e.target }
 
       const match = e.id.match(/_(\d+)$/)
       if (match) {
@@ -586,6 +764,8 @@ export const useGraphStore = create<GraphState>((set, get) => ({
         }
       }
     })
+
+    const edges = normalizeToSequentialEdges(nodes, parsedEdges)
 
     nextNodeId = maxNodeNum > 0 ? maxNodeNum + 1 : nextNodeId
     nextEdgeId = maxEdgeNum > 0 ? maxEdgeNum + 1 : nextEdgeId

@@ -1,0 +1,37 @@
+# Local env / virtualenv
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# Python cache/test artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Packaging/build artifacts
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# Runtime/data outputs
+artifacts/
+client_outputs/
+datasets/data/
+*.pid
+*.sock
+
+# Notebook checkpoints
+.ipynb_checkpoints/

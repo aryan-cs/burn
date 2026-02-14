@@ -13,8 +13,7 @@ export function useWebSocket() {
   useEffect(() => {
     if (status !== 'training' || !jobId) return
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/training/${jobId}`)
+    const ws = new WebSocket(buildTrainingWsUrl(jobId))
     wsRef.current = ws
 
     ws.onmessage = (event) => {
@@ -63,4 +62,26 @@ export function useWebSocket() {
   }, [])
 
   return { sendStop }
+}
+
+function buildTrainingWsUrl(jobId: string): string {
+  const envWsBase = import.meta.env.VITE_BACKEND_WS_URL?.trim()
+  if (envWsBase) {
+    return `${trimTrailingSlash(envWsBase)}/ws/training/${jobId}`
+  }
+
+  const envHttpBase = import.meta.env.VITE_BACKEND_HTTP_URL?.trim()
+  if (envHttpBase) {
+    const wsBase = envHttpBase
+      .replace(/^https:\/\//, 'wss://')
+      .replace(/^http:\/\//, 'ws://')
+    return `${trimTrailingSlash(wsBase)}/ws/training/${jobId}`
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${protocol}//${window.location.host}/ws/training/${jobId}`
+}
+
+function trimTrailingSlash(value: string): string {
+  return value.endsWith('/') ? value.slice(0, -1) : value
 }

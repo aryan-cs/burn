@@ -1,8 +1,26 @@
-.env
-.venv/
-backend/datasets/data/
+# Workspace-level ignores
 
-# Python cache/test artifacts
+# OS / editor
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+!.vscode/extensions.json
+
+# Logs
+*.log
+
+# Local env files
+.env
+.env.*
+!.env.example
+
+# Local virtual environments
+.venv/
+venv/
+
+# Python cache/test artifacts (repo-wide)
 __pycache__/
 *.py[cod]
 *$py.class
@@ -16,3 +34,6 @@ __pycache__/
 .coverage
 .coverage.*
 htmlcov/
+
+# Dependencies if installed at repo root
+/node_modules/

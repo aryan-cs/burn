@@ -34,52 +34,28 @@ export function getLayerRolesForColoring(
     return roles
   }
 
-  const adjacency = new Map<string, string[]>()
-  nodeIds.forEach((nodeId) => adjacency.set(nodeId, []))
-
-  validEdges.forEach((edge) => {
-    if (edge.source === edge.target) return
-    adjacency.get(edge.source)?.push(edge.target)
-    adjacency.get(edge.target)?.push(edge.source)
-  })
-
-  const visited = new Set<string>()
-  nodeIds.forEach((startNodeId) => {
-    if (visited.has(startNodeId)) return
-
-    const queue = [startNodeId]
-    const componentNodes: string[] = []
-    visited.add(startNodeId)
-
-    for (let cursor = 0; cursor < queue.length; cursor += 1) {
-      const currentNodeId = queue[cursor]
-      componentNodes.push(currentNodeId)
-
-      const neighbors = adjacency.get(currentNodeId) ?? []
-      neighbors.forEach((neighborId) => {
-        if (visited.has(neighborId)) return
-        visited.add(neighborId)
-        queue.push(neighborId)
-      })
-    }
-
-    if (componentNodes.length < 2) return
-
-    const componentNodeSet = new Set(componentNodes)
-    const componentEdges = validEdges.filter(
-      (edge) =>
-        componentNodeSet.has(edge.source) &&
-        componentNodeSet.has(edge.target) &&
-        edge.source !== edge.target
+  const connectedNodeIds = Array.from(
+    new Set(
+      validEdges
+        .flatMap((edge) => [edge.source, edge.target])
+        .filter((nodeId) => Boolean(nodes[nodeId]))
     )
-    if (componentEdges.length === 0) return
+  )
+  if (connectedNodeIds.length < 2) {
+    return roles
+  }
 
-    const ordered = orderNodesByDirectedEdges(componentNodes, componentEdges)
-    if (ordered.length < 2) return
+  const ordered = orderNodesByDirectedEdges(connectedNodeIds, validEdges)
+  if (ordered.length < 2) {
+    return roles
+  }
 
-    roles.set(ordered[0], 'input')
-    roles.set(ordered[ordered.length - 1], 'output')
-  })
+  const inputNodeId = ordered[0]
+  const outputNodeId = ordered[ordered.length - 1]
+  roles.set(inputNodeId, 'input')
+  if (outputNodeId !== inputNodeId) {
+    roles.set(outputNodeId, 'output')
+  }
 
   return roles
 }

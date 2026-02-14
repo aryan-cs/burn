@@ -66,7 +66,7 @@ export function Viewport() {
 
   return (
     <div
-      className="relative h-full w-full"
+      className="viewport-root"
       onPointerDown={handleWrapperPointerDown}
       onPointerMove={handleWrapperPointerMove}
       onPointerUp={handleWrapperPointerUp}
@@ -88,7 +88,7 @@ export function Viewport() {
 
       {highlightSelectionActive && selectionRectStyle ? (
         <div
-          className="pointer-events-none absolute border border-[#9ebeff] bg-[#9ebeff]/15"
+          className="viewport-selection-rect"
           style={selectionRectStyle}
         />
       ) : null}

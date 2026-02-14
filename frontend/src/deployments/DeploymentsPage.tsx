@@ -77,6 +77,7 @@ export default function DeploymentsPage() {
     () => (selectedId ? deployments.find((deployment) => deployment.deployment_id === selectedId) ?? null : null),
     [deployments, selectedId]
   )
+  const showEmptyState = deployments.length === 0
 
   const runAction = async (actionName: string, action: () => Promise<void>) => {
     if (busyAction) return
@@ -181,22 +182,18 @@ export default function DeploymentsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId])
 
-  const stopSelected = () =>
-    runAction('stop', async () => {
-      if (!selectedId) throw new Error('Select a deployment first.')
-      await requestJson<DeploymentInfo>(`/api/deploy/${selectedId}`, { method: 'DELETE' })
+  const toggleSelected = () =>
+    runAction('toggle', async () => {
+      if (!selectedId || !selectedFromList) throw new Error('Select a deployment first.')
+      const wasRunning = selectedFromList.status === 'running'
+      if (wasRunning) {
+        await requestJson<DeploymentInfo>(`/api/deploy/${selectedId}`, { method: 'DELETE' })
+      } else {
+        await requestJson<DeploymentInfo>(`/api/deploy/${selectedId}/start`, { method: 'POST' })
+      }
       await fetchDeployments(true)
       await fetchSelected(selectedId)
-      setMessage(`Stopped ${getDeploymentDisplayName(selectedFromList)}.`)
-    })
-
-  const startSelected = () =>
-    runAction('start', async () => {
-      if (!selectedId) throw new Error('Select a deployment first.')
-      await requestJson<DeploymentInfo>(`/api/deploy/${selectedId}/start`, { method: 'POST' })
-      await fetchDeployments(true)
-      await fetchSelected(selectedId)
-      setMessage(`Started ${getDeploymentDisplayName(selectedFromList)}.`)
+      setMessage(`${wasRunning ? 'Stopped' : 'Started'} ${getDeploymentDisplayName(selectedFromList)}.`)
     })
 
   const inferSelected = () =>
@@ -218,13 +215,13 @@ export default function DeploymentsPage() {
     <div className="deployments-root">
       <header className="deployments-header">
         <div>
-          <p className="deployments-kicker">Deployment Control</p>
+          <p className="deployments-kicker">View Your Models.</p>
           <h1 className="deployments-title">Local Deployment Manager</h1>
         </div>
         <div className="deployments-summary">
-          <span>Total: {deployments.length}</span>
-          <span>Running: {activeCount}</span>
-          <a href="/" className="deployments-link">Back To Hub</a>
+          <a href="/" className="deployments-link deployments-icon-link" aria-label="Back to Hub" title="Back to Hub">
+            <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M240-200h120v-240h240v240h120v-360L480-740 240-560v360Zm-80 80v-480l320-240 320 240v480H520v-240h-80v240H160Zm320-350Z"/></svg>
+          </a>
         </div>
       </header>
 
@@ -235,13 +232,19 @@ export default function DeploymentsPage() {
               type="button"
               onClick={() => void runAction('refresh_list', fetchDeployments)}
               disabled={busyAction !== null}
-              className="deployments-btn"
+              className="deployments-btn deployments-icon-btn"
+              aria-label="Refresh deployment list"
+              title={busyAction === 'refresh_list' ? 'Refreshing...' : 'Refresh List'}
             >
-              {busyAction === 'refresh_list' ? 'Refreshing...' : 'Refresh List'}
+              <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z"/></svg>
             </button>
+            <div className="deployments-toolbar-summary" aria-live="polite">
+              <span>Running: {activeCount}</span>
+              <span>Total: {deployments.length}</span>
+            </div>
           </div>
           <div className="deployments-list">
-            {deployments.length === 0 ? (
+            {showEmptyState ? (
               <p className="deployments-empty">No deployments.</p>
             ) : (
               deployments.map((deployment) => (
@@ -273,94 +276,100 @@ export default function DeploymentsPage() {
         </section>
 
         <section className="deployments-detail-panel">
-          <div className="deployments-detail-head">
-            <h2>Deployment Details</h2>
-            <div className="deployments-detail-actions">
-              <button
-                type="button"
-                onClick={() => {
-                  if (!selectedId) return
-                  void runAction('refresh_selected', async () => {
-                    await fetchSelected(selectedId)
-                    setMessage(`Refreshed ${getDeploymentDisplayName(selectedFromList)}.`)
-                  })
-                }}
-                disabled={busyAction !== null || !selectedId}
-                className="deployments-btn"
-              >
-                {busyAction === 'refresh_selected' ? 'Refreshing...' : 'Refresh'}
-              </button>
-              <button
-                type="button"
-                onClick={inferSelected}
-                disabled={busyAction !== null || !selectedFromList || selectedFromList.status !== 'running'}
-                className="deployments-btn"
-              >
-                {busyAction === 'infer' ? 'Inferencing...' : 'Run Test Inference'}
-              </button>
-              <button
-                type="button"
-                onClick={startSelected}
-                disabled={busyAction !== null || !selectedFromList || selectedFromList.status === 'running'}
-                className="deployments-btn deployments-btn-success"
-              >
-                {busyAction === 'start' ? 'Starting...' : 'Start'}
-              </button>
-              <button
-                type="button"
-                onClick={stopSelected}
-                disabled={busyAction !== null || !selectedFromList || selectedFromList.status !== 'running'}
-                className="deployments-btn deployments-btn-danger"
-              >
-                {busyAction === 'stop' ? 'Stopping...' : 'Stop'}
-              </button>
-            </div>
-          </div>
-
-          <p className="deployments-message">{message}</p>
-
-          {selected ? (
+          {showEmptyState ? (
+            <section className="deployments-empty-stage deployments-empty-stage-panel" aria-live="polite">
+              <p>It's pretty empty here...</p>
+            </section>
+          ) : (
             <>
-              <div className="deployments-meta-grid">
-                <div><span>Name</span><code>{getDeploymentDisplayName(selected)}</code></div>
-                <div><span>Deployment ID</span><code>{selected.deployment_id}</code></div>
-                <div><span>Job ID</span><code>{selected.job_id}</code></div>
-                <div><span>Status</span><code>{selected.status}</code></div>
-                <div><span>Target</span><code>{selected.target}</code></div>
-                <div><span>Endpoint</span><code>{selected.endpoint_path}</code></div>
-                <div><span>Requests</span><code>{selected.request_count}</code></div>
-                <div><span>Created</span><code>{formatDateTime(selected.created_at)}</code></div>
-              </div>
-
-              <div className="deployments-block">
-                <h3>Logs</h3>
-                <div className="deployments-logs">
-                  {logs.length === 0 ? (
-                    <p className="deployments-empty">No logs yet.</p>
-                  ) : (
-                    logs.map((log, index) => (
-                      <div key={`${log.timestamp}-${index}`} className="deployments-log-line">
-                        <span className="deployments-log-time">{formatTime(log.timestamp)}</span>
-                        <span className={`deployments-log-level deployments-log-level-${log.level}`}>
-                          {log.level}
-                        </span>
-                        <span className="deployments-log-event">{log.event}</span>
-                        <span className="deployments-log-message">{log.message}</span>
-                      </div>
-                    ))
-                  )}
+              <div className="deployments-detail-head">
+                <h2>Deployment Details</h2>
+                <div className="deployments-detail-actions">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!selectedId) return
+                      void runAction('refresh_selected', async () => {
+                        await fetchSelected(selectedId)
+                        setMessage(`Refreshed ${getDeploymentDisplayName(selectedFromList)}.`)
+                      })
+                    }}
+                    disabled={busyAction !== null || !selectedId}
+                    className="deployments-btn deployments-icon-btn"
+                    aria-label="Refresh selected deployment"
+                    title={busyAction === 'refresh_selected' ? 'Refreshing...' : 'Refresh'}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z"/></svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={inferSelected}
+                    disabled={busyAction !== null || !selectedFromList || selectedFromList.status !== 'running'}
+                    className="deployments-btn deployments-icon-btn"
+                    aria-label={busyAction === 'infer' ? 'Inferencing...' : 'Run Test Inference'}
+                    title={busyAction === 'infer' ? 'Inferencing...' : 'Run Test Inference'}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M200-120q-51 0-72.5-45.5T138-250l222-270v-240h-40q-17 0-28.5-11.5T280-800q0-17 11.5-28.5T320-840h320q17 0 28.5 11.5T680-800q0 17-11.5 28.5T640-760h-40v240l222 270q32 39 10.5 84.5T760-120H200Zm0-80h560L520-492v-268h-80v268L200-200Zm280-280Z"/></svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleSelected}
+                    disabled={busyAction !== null || !selectedFromList}
+                    className="deployments-btn deployments-icon-btn"
+                    aria-label={busyAction === 'toggle' ? 'Toggling...' : 'Toggle Instance'}
+                    title={busyAction === 'toggle' ? 'Toggling...' : 'Toggle Instance'}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M200-312v-336l240 168-240 168Zm320-8v-320h80v320h-80Zm160 0v-320h80v320h-80Z"/></svg>
+                  </button>
                 </div>
               </div>
 
-              <div className="deployments-block">
-                <h3>Last Inference Result</h3>
-                <pre className="deployments-infer">{inferResult}</pre>
-              </div>
+              <p className="deployments-message">{message}</p>
+
+              {selected ? (
+                <>
+                  <div className="deployments-meta-grid">
+                    <div><span>Name</span><code>{getDeploymentDisplayName(selected)}</code></div>
+                    <div><span>Deployment ID</span><code>{selected.deployment_id}</code></div>
+                    <div><span>Job ID</span><code>{selected.job_id}</code></div>
+                    <div><span>Status</span><code>{selected.status}</code></div>
+                    <div><span>Target</span><code>{selected.target}</code></div>
+                    <div><span>Endpoint</span><code>{selected.endpoint_path}</code></div>
+                    <div><span>Requests</span><code>{selected.request_count}</code></div>
+                    <div><span>Created</span><code>{formatDateTime(selected.created_at)}</code></div>
+                  </div>
+
+                  <div className="deployments-block">
+                    <h3>Logs</h3>
+                    <div className="deployments-logs">
+                      {logs.length === 0 ? (
+                        <p className="deployments-empty">No logs yet.</p>
+                      ) : (
+                        logs.map((log, index) => (
+                          <div key={`${log.timestamp}-${index}`} className="deployments-log-line">
+                            <span className="deployments-log-time">{formatTime(log.timestamp)}</span>
+                            <span className={`deployments-log-level deployments-log-level-${log.level}`}>
+                              {log.level}
+                            </span>
+                            <span className="deployments-log-event">{log.event}</span>
+                            <span className="deployments-log-message">{log.message}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="deployments-block">
+                    <h3>Last Inference Result</h3>
+                    <pre className="deployments-infer">{inferResult}</pre>
+                  </div>
+                </>
+              ) : (
+                <p className="deployments-empty">
+                  {isLoadingSelected ? 'Loading deployment details...' : 'Select a deployment from the left panel.'}
+                </p>
+              )}
             </>
-          ) : (
-            <p className="deployments-empty">
-              {isLoadingSelected ? 'Loading deployment details...' : 'Select a deployment from the left panel.'}
-            </p>
           )}
         </section>
       </main>

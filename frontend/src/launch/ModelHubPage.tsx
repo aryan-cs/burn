@@ -1,30 +1,78 @@
 import './modelHub.css'
 
+let NN = "Neural Network"
+let RF = "Random Forest"
+let VLM = "Vision-Language"
+let SVM = "SVM"
+let PCA = "PCA"
+let LINREG = "Linear Regression"
+let LOGREG = "Logistic Regression"
+
 type LaunchCard = {
   title: string
   subtitle: string
   description: string
   href: string
   badge: string
-  tone: 'nn' | 'rf'
+  tone: 'nn' | 'rf' | 'vlm' | 'svm' | 'pca' | 'linreg' | 'logreg'
 }
 
 const SCRATCH_CARDS: LaunchCard[] = [
   {
     title: 'Neural Network Builder',
     subtitle: 'Start From Scratch',
-    description: 'Blank NN canvas with interactive 3D layer graph editing.',
+    description: 'Blank canvas with interactive 3D layer graph editing.',
     href: '/nn?mode=scratch',
-    badge: 'NN',
+    badge: NN,
     tone: 'nn',
   },
   {
     title: 'Random Forest Builder',
     subtitle: 'Start From Scratch',
-    description: 'Blank RF workspace with 3D node pipeline and sklearn backend.',
+    description: 'Blank workspace with 3D node pipeline and sklearn backend.',
     href: '/rf?mode=scratch',
-    badge: 'RF',
+    badge: RF,
     tone: 'rf',
+  },
+  {
+    title: 'Vision-Language Model Builder',
+    subtitle: 'Start From Scratch',
+    description: 'Coming soon!',
+    href: '#',
+    badge: VLM,
+    tone: 'vlm',
+  },
+  {
+    title: 'Support Vector Machine Builder',
+    subtitle: 'Start From Scratch',
+    description: 'Coming soon!',
+    href: '#',
+    badge: SVM,
+    tone: 'svm',
+  },
+  {
+    title: 'Principal Component Analysis Builder',
+    subtitle: 'Start From Scratch',
+    description: 'Coming soon!',
+    href: '#',
+    badge: PCA,
+    tone: 'pca',
+  },
+  {
+    title: 'Linear Regression Builder',
+    subtitle: 'Start From Scratch',
+    description: 'Coming soon!',
+    href: '#',
+    badge: LINREG,
+    tone: 'linreg',
+  },
+  {
+    title: 'Logistic Regression Builder',
+    subtitle: 'Start From Scratch',
+    description: 'Coming soon!',
+    href: '#',
+    badge: LOGREG,
+    tone: 'logreg',
   },
 ]
 
@@ -34,7 +82,7 @@ const PRESET_CARDS: LaunchCard[] = [
     subtitle: 'Preset Project',
     description: 'Input → Flatten → Dense → Output. Good default for first compile/train.',
     href: '/nn?mode=preset&template=mnist_basic',
-    badge: 'NN',
+    badge: NN,
     tone: 'nn',
   },
   {
@@ -42,7 +90,7 @@ const PRESET_CARDS: LaunchCard[] = [
     subtitle: 'Preset Project',
     description: 'Adds dropout and deeper hidden path for experimentation.',
     href: '/nn?mode=preset&template=mnist_dropout',
-    badge: 'NN',
+    badge: NN,
     tone: 'nn',
   },
   {
@@ -50,7 +98,7 @@ const PRESET_CARDS: LaunchCard[] = [
     subtitle: 'Preset Project',
     description: '8x8 handwritten digits classifier. Great first non-MNIST NN example.',
     href: '/nn?mode=preset&template=digits_basic',
-    badge: 'NN',
+    badge: NN,
     tone: 'nn',
   },
   {
@@ -58,7 +106,7 @@ const PRESET_CARDS: LaunchCard[] = [
     subtitle: 'Preset Project',
     description: 'Classic low-dimensional classification with RandomForestClassifier.',
     href: '/rf?mode=preset&template=iris_basic',
-    badge: 'RF',
+    badge: RF,
     tone: 'rf',
   },
   {
@@ -66,7 +114,7 @@ const PRESET_CARDS: LaunchCard[] = [
     subtitle: 'Preset Project',
     description: 'Multi-class RF setup tuned for wine quality tabular data.',
     href: '/rf?mode=preset&template=wine_quality',
-    badge: 'RF',
+    badge: RF,
     tone: 'rf',
   },
   {
@@ -74,7 +122,7 @@ const PRESET_CARDS: LaunchCard[] = [
     subtitle: 'Preset Project',
     description: 'Binary RF classifier preset for diagnostic feature vectors.',
     href: '/rf?mode=preset&template=breast_cancer_fast',
-    badge: 'RF',
+    badge: RF,
     tone: 'rf',
   },
 ]
@@ -84,19 +132,14 @@ const RF_PRESET_CARDS = PRESET_CARDS.filter((card) => card.tone === 'rf')
 
 function LaunchCardView({ card }: { card: LaunchCard }) {
   return (
-    <article className={`hub-card hub-card-${card.tone}`}>
+    <a href={card.href} className={`hub-card hub-card-${card.tone} hub-card-link`}>
       <div className="hub-card-head">
         <div className="hub-card-subtitle">{card.subtitle}</div>
         <div className={`hub-badge hub-badge-${card.tone}`}>{card.badge}</div>
       </div>
       <h3 className="hub-card-title">{card.title}</h3>
       <p className="hub-card-description">{card.description}</p>
-      <div className="hub-card-footer">
-        <a href={card.href} className={`hub-launch-btn hub-launch-btn-${card.tone}`}>
-          Launch Project
-        </a>
-      </div>
-    </article>
+    </a>
   )
 }
 
@@ -106,18 +149,20 @@ export default function ModelHubPage() {
       <div className="hub-backdrop-grid" />
       <div className="hub-backdrop-glow" />
       <header className="hub-header">
-        <div className="hub-kicker">Machine Learning Studio</div>
-        <h1 className="hub-title">Choose Your Build Path</h1>
+        <div className="hub-kicker">Build, Tweak, Deploy.</div>
+        <h1 className="hub-title">Welcome to Burn.</h1>
         <p className="hub-subtitle">
-          Start from an empty builder or launch a preset project that is configured to run immediately.
-          RF presets require Kaggle credentials in the backend environment.
+          Burn simplifies the process of building machine models from scratch, allowing anyone to harness the power of machine learning.
+          Whether you're a student building their first classifier or a business designing an end-to-end demand forecasting engine, Burn is there to help.
         </p>
         <p className="hub-subtitle">
-          New: the Digits NN preset uses the built-in sklearn dataset and works without Kaggle setup.
-        </p>
-        <p className="hub-subtitle">
-          Need to manage live model endpoints later? Open{' '}
-          <a href="/deployments" className="hub-inline-link">
+          Want to share your work with the world? Check out the {' '}
+          <a
+            href="/deployments"
+            className="hub-inline-link"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
             Deployment Manager
           </a>
           .

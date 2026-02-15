@@ -230,9 +230,6 @@ export default function DeploymentsPage() {
           <a href="/builders" className="deployments-link deployments-nav-btn">
             Model Builder
           </a>
-          <a href="/" className="deployments-link deployments-nav-btn">
-            Home
-          </a>
         </div>
       </header>
 

@@ -1541,14 +1541,6 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
         </button>
         <div className="builder-nav-links">
           <a
-            href="/"
-            className="builder-home-button"
-            aria-label="Go to home"
-            title="Home"
-          >
-            Home
-          </a>
-          <a
             href="/deployments"
             className="builder-deployments-button"
             aria-label="Go to deployments"

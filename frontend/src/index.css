@@ -232,7 +232,6 @@ button {
   gap: 8px;
 }
 
-.builder-home-button,
 .builder-deployments-button {
   display: inline-flex;
   align-items: center;
@@ -290,7 +289,6 @@ button {
   bottom: 64px;
 }
 
-.builder-home-button:hover,
 .builder-deployments-button:hover,
 .align-button:hover:not(:disabled),
 .detail-mode-button:hover {
@@ -316,7 +314,6 @@ button {
     gap: 6px;
   }
 
-  .builder-home-button,
   .builder-deployments-button {
     min-height: 30px;
     padding: 0 8px;

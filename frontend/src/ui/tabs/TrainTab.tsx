@@ -113,7 +113,7 @@ export function TrainTab({
               className="config-control"
             >
               <option value="local">Local</option>
-              <option value="cloud">Cloud</option>
+              <option value="cloud">Modal</option>
             </select>
           </label>
 

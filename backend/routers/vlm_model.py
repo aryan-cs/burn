@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -11,12 +12,14 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from PIL import Image
 
 from core.vlm_architecture import load_vlm_architecture_spec
+from core.compute_node_client import ComputeNodeError, compute_node_client
 from core.vlm_registry import VLMJobEntry, vlm_job_registry
 from core.vlm_runtime import DEFAULT_VLM_MODEL_ID, vlm_runtime
 from core.vlm_training_engine import run_vlm_training_job
 
 
 router = APIRouter(prefix="/api/vlm", tags=["vlm"])
+logger = logging.getLogger(__name__)
 ARTIFACTS_DIR = Path(__file__).resolve().parents[1] / "artifacts"
 DEFAULT_VLM_DATASET_ID = "synthetic_boxes_tiny"
 
@@ -272,14 +275,81 @@ async def vlm_latest() -> dict[str, Any]:
 
 @router.post("/infer")
 async def vlm_infer(payload: VLMInferRequest) -> dict[str, Any]:
-    image = _decode_data_url_image(payload.image_base64)
     resolved_job_id, artifact_path, model_id = _resolve_job_artifact(payload.job_id)
+
+    remote_warning: str | None = None
+    if artifact_path is None and compute_node_client.enabled:
+        logger.info(
+            "VLM infer attempting remote compute request: url=%s model_id=%s job_id=%s",
+            compute_node_client.base_url,
+            model_id,
+            resolved_job_id,
+        )
+        try:
+            remote_response = await compute_node_client.infer(
+                image_base64=payload.image_base64,
+                model_id=model_id,
+                score_threshold=payload.score_threshold,
+                max_detections=payload.max_detections,
+            )
+            remote_backend = str(
+                remote_response.get("runtime_backend")
+                or remote_response.get("backend")
+                or "unknown"
+            )
+            remote_model_id = str(
+                remote_response.get("runtime_model_id")
+                or remote_response.get("model_id")
+                or model_id
+            )
+            remote_device = str(remote_response.get("runtime_device", "unknown"))
+            logger.info(
+                "VLM infer routed to compute node: model_id=%s backend=%s device=%s job_id=%s",
+                remote_model_id,
+                remote_backend,
+                remote_device,
+                resolved_job_id,
+            )
+            return {
+                "job_id_used": resolved_job_id,
+                "runtime_backend": f"remote:{remote_backend}",
+                "runtime_model_id": remote_model_id,
+                "image_width": int(remote_response.get("image_width", 0)),
+                "image_height": int(remote_response.get("image_height", 0)),
+                "detections": remote_response.get("detections", []),
+                "warning": remote_response.get("warning"),
+            }
+        except ComputeNodeError as exc:
+            remote_warning = f"Remote compute node unavailable ({exc}); using local backend."
+            logger.warning("VLM infer remote compute unavailable; falling back local: %s", exc)
+
+    if artifact_path is not None:
+        logger.info(
+            "VLM infer using local artifact model: artifact_path=%s job_id=%s",
+            artifact_path,
+            resolved_job_id,
+        )
+    elif not compute_node_client.enabled:
+        logger.info("VLM infer using local runtime because compute node is not configured")
+
+    image = _decode_data_url_image(payload.image_base64)
     runtime = vlm_runtime.ensure_model(model_id)
     detection = vlm_runtime.detect(
         image,
         score_threshold=payload.score_threshold,
         max_detections=payload.max_detections,
         artifact_path=artifact_path,
+    )
+    warning = detection.get("warning")
+    if remote_warning and warning:
+        warning = f"{remote_warning} {warning}"
+    elif remote_warning:
+        warning = remote_warning
+    logger.info(
+        "VLM infer served by local runtime: backend=%s model_id=%s job_id=%s",
+        runtime.backend,
+        runtime.model_id,
+        resolved_job_id,
     )
     return {
         "job_id_used": resolved_job_id,
@@ -288,5 +358,5 @@ async def vlm_infer(payload: VLMInferRequest) -> dict[str, Any]:
         "image_width": detection["image_width"],
         "image_height": detection["image_height"],
         "detections": detection["detections"],
-        "warning": detection.get("warning"),
+        "warning": warning,
     }

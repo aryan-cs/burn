@@ -23,6 +23,7 @@ from core.job_storage import (
 from core.job_registry import job_registry
 from core.shape_inference import validate_graph
 from core.training_engine import run_training_job
+from datasets.loader import get_cats_vs_dogs_inference_samples
 from datasets.registry import get_dataset_meta
 from models.graph_schema import GraphSpec
 from models.training_config import normalize_training_config
@@ -37,7 +38,7 @@ def _resolve_reported_training_backend(location: Literal["local", "cloud"] | Non
         return "modal"
     if location == "local":
         return "local"
-    return os.getenv("TRAINING_BACKEND", "modal").strip().lower()
+    return os.getenv("TRAINING_BACKEND", "local").strip().lower()
 
 
 class StopRequest(BaseModel):
@@ -174,6 +175,28 @@ def _to_inference_tensor(raw_inputs: Any, expected_shape: list[int] | None) -> t
 
     expected_rank = len(expected_shape)
     expected_elems = math.prod(expected_shape)
+    expected_channels = int(expected_shape[0]) if expected_rank >= 3 else None
+
+    if (
+        expected_rank == 3
+        and tensor.ndim == 2
+        and list(tensor.shape) == expected_shape[1:]
+    ):
+        tensor = tensor.unsqueeze(0)
+        if expected_channels and expected_channels > 1:
+            tensor = tensor.repeat(expected_channels, 1, 1)
+        return tensor.unsqueeze(0)
+
+    if (
+        expected_rank == 3
+        and tensor.ndim == 3
+        and tensor.shape[0] == 1
+        and expected_channels
+        and expected_channels > 1
+        and list(tensor.shape[1:]) == expected_shape[1:]
+    ):
+        tensor = tensor.repeat(expected_channels, 1, 1)
+        return tensor.unsqueeze(0)
 
     if tensor.ndim == expected_rank:
         tensor = tensor.unsqueeze(0)
@@ -388,6 +411,48 @@ async def export_model(job_id: str, format: Literal["py", "pt"] = "py"):
         )
 
     return FileResponse(path=artifact_path, filename=f"{job_id}.pt", media_type="application/octet-stream")
+
+
+@router.get("/inference-samples")
+async def inference_samples(
+    dataset: str,
+    split: Literal["train", "test"] = "test",
+    limit: int = Query(default=8, ge=1, le=32),
+):
+    normalized_dataset = dataset.strip().lower()
+    if normalized_dataset != "cats_vs_dogs":
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": (
+                    "Dataset sample inference is currently supported for cats_vs_dogs only."
+                )
+            },
+        )
+
+    try:
+        samples = get_cats_vs_dogs_inference_samples(limit=limit, split=split)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail={"message": str(exc)}) from exc
+    meta = get_dataset_meta(normalized_dataset) or {}
+    input_shape = meta.get("input_shape")
+    if not isinstance(input_shape, list):
+        first_inputs = samples[0].get("inputs") if samples else None
+        if isinstance(first_inputs, list) and first_inputs and isinstance(first_inputs[0], list):
+            input_shape = [len(first_inputs), len(first_inputs[0]), len(first_inputs[0][0])]
+        else:
+            input_shape = None
+
+    return {
+        "dataset": normalized_dataset,
+        "split": split,
+        "input_shape": input_shape,
+        "classes": [
+            {"index": 0, "name": "cat"},
+            {"index": 1, "name": "dog"},
+        ],
+        "samples": samples,
+    }
 
 
 @router.post("/infer")

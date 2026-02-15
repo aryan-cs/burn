@@ -32,6 +32,8 @@ const DEFAULT_ACTIVATION = 'linear'
 const DEFAULT_INFERENCE_ROWS = 28
 const DEFAULT_INFERENCE_COLS = 28
 const LOW_DETAIL_STORAGE_KEY = 'mlcanvas.nn.low_detail_mode'
+const DATASET_IMAGE_SAMPLE_LIMIT = 8
+const DATASET_CATS_VS_DOGS = 'cats_vs_dogs'
 const ACTIVATION_OPTIONS = [
   'linear',
   'relu',
@@ -63,6 +65,23 @@ interface TrainResponse {
 interface InferResponse {
   predictions?: number[]
   probabilities?: number[][]
+}
+
+interface InferenceDatasetSample {
+  id: string
+  filename: string
+  label: number
+  label_name: string
+  image_data_url: string
+  inputs: number[][][]
+}
+
+interface InferenceDatasetSamplesResponse {
+  dataset: string
+  split: 'train' | 'test'
+  input_shape: number[] | null
+  classes: Array<{ index: number; name: string }>
+  samples: InferenceDatasetSample[]
 }
 
 interface DeploymentResponse {
@@ -130,6 +149,15 @@ function getErrorMessageFromBody(body: string, status: number): string {
   } catch {
     return body
   }
+}
+
+function predictionLabelForDataset(datasetId: string, prediction: number | null): string {
+  if (prediction === null) return 'none'
+  if (datasetId === DATASET_CATS_VS_DOGS) {
+    if (prediction === 0) return 'cat (0)'
+    if (prediction === 1) return 'dog (1)'
+  }
+  return String(prediction)
 }
 
 function App() {
@@ -228,6 +256,7 @@ function App() {
   const startTraining = useTrainingStore((s) => s.startTraining)
   const setTrainingError = useTrainingStore((s) => s.setError)
   const trainingMetrics = useTrainingStore((s) => s.metrics)
+  const lossLandscape = useTrainingStore((s) => s.lossLandscape)
   const currentEpoch = useTrainingStore((s) => s.currentEpoch)
   const { sendStop } = useWebSocket()
 
@@ -248,6 +277,10 @@ function App() {
   const [inferenceGrid, setInferenceGrid] = useState<number[][]>(() =>
     createEmptyInferenceGrid(inferenceGridSize.rows, inferenceGridSize.cols)
   )
+  const [inferenceSamples, setInferenceSamples] = useState<InferenceDatasetSample[]>([])
+  const [selectedInferenceSampleId, setSelectedInferenceSampleId] = useState<string | null>(null)
+  const [inferenceSamplesLoading, setInferenceSamplesLoading] = useState(false)
+  const [inferenceSamplesError, setInferenceSamplesError] = useState<string | null>(null)
   const [inferenceTopPrediction, setInferenceTopPrediction] = useState<number | null>(null)
   const [deployment, setDeployment] = useState<DeploymentResponse | null>(null)
   const [deployTarget, setDeployTarget] = useState<DeployTarget>('local')
@@ -255,6 +288,10 @@ function App() {
   const [deployOutput, setDeployOutput] = useState('No deployed inference output yet.')
   const isEditingName = Boolean(editingNodeId && editingNodeId === selectedNodeId)
   const isBackendBusy = backendBusyAction !== null
+  const usesImageInferenceSamples = trainingConfig.dataset === DATASET_CATS_VS_DOGS
+  const selectedInferenceSample = inferenceSamples.find(
+    (sample) => sample.id === selectedInferenceSampleId
+  ) ?? null
   const latestTrainingMetric = trainingMetrics[trainingMetrics.length - 1]
   const latestTrainLoss = latestTrainingMetric
     ? latestTrainingMetric.trainLoss ?? latestTrainingMetric.loss
@@ -283,6 +320,9 @@ function App() {
     Boolean(trainingJobId)
   const canOpenDeployTab =
     Boolean(deployment) || (Boolean(trainingJobId) && trainingStatus === 'complete')
+  const requiresImageSampleSelection =
+    usesImageInferenceSamples &&
+    (inferenceSamplesLoading || !selectedInferenceSample || inferenceSamples.length === 0)
   const activeTabIndex =
     activeTab === 'validate' ? 0 : activeTab === 'train' ? 1 : activeTab === 'infer' ? 2 : 3
 
@@ -345,6 +385,54 @@ function App() {
       return createEmptyInferenceGrid(inferenceGridSize.rows, inferenceGridSize.cols)
     })
   }, [inferenceGridSize.rows, inferenceGridSize.cols])
+
+  useEffect(() => {
+    if (!usesImageInferenceSamples) {
+      setInferenceSamples([])
+      setSelectedInferenceSampleId(null)
+      setInferenceSamplesLoading(false)
+      setInferenceSamplesError(null)
+      return
+    }
+
+    let cancelled = false
+    setInferenceSamplesLoading(true)
+    setInferenceSamplesError(null)
+
+    requestJson<InferenceDatasetSamplesResponse>(
+      `/api/model/inference-samples?dataset=${DATASET_CATS_VS_DOGS}&split=test&limit=${DATASET_IMAGE_SAMPLE_LIMIT}`
+    )
+      .then((response) => {
+        if (cancelled) return
+        const samples = Array.isArray(response.samples) ? response.samples : []
+        setInferenceSamples(samples)
+        setSelectedInferenceSampleId((prev) => {
+          if (prev && samples.some((sample) => sample.id === prev)) return prev
+          return samples[0]?.id ?? null
+        })
+        if (samples.length === 0) {
+          setInferenceSamplesError('No dataset samples available for inference.')
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return
+        const message = error instanceof Error ? error.message : String(error)
+        const friendlyMessage =
+          message.trim().toLowerCase() === 'not found'
+            ? 'Backend endpoint /api/model/inference-samples is missing. Restart backend from latest code.'
+            : message
+        setInferenceSamples([])
+        setSelectedInferenceSampleId(null)
+        setInferenceSamplesError(friendlyMessage)
+      })
+      .finally(() => {
+        if (!cancelled) setInferenceSamplesLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [usesImageInferenceSamples])
 
   const handleAddLayer = () => {
     const state = useGraphStore.getState()
@@ -512,9 +600,9 @@ function App() {
     if (!Number.isInteger(nextRows) || nextRows <= 0) return
 
     if (selectedNode.type === 'Input') {
-      const [, _height, width] = toInputShapeOrDefault(selectedNode.config.shape)
+      const [channels, , width] = toInputShapeOrDefault(selectedNode.config.shape)
       updateNodeConfig(selectedNodeId, {
-        shape: [1, nextRows, width],
+        shape: [channels, nextRows, width],
       })
       setHasValidatedModel(false)
       return
@@ -534,9 +622,9 @@ function App() {
     if (!Number.isInteger(nextCols) || nextCols <= 0) return
 
     if (selectedNode.type === 'Input') {
-      const [, height] = toInputShapeOrDefault(selectedNode.config.shape)
+      const [channels, height] = toInputShapeOrDefault(selectedNode.config.shape)
       updateNodeConfig(selectedNodeId, {
-        shape: [1, height, nextCols],
+        shape: [channels, height, nextCols],
       })
       setHasValidatedModel(false)
       return
@@ -552,7 +640,13 @@ function App() {
 
   const handleActivationChange = (nextActivation: string) => {
     if (!selectedNodeId || !selectedNode) return
-    if (selectedNode.type !== 'Dense' && selectedNode.type !== 'Output') return
+    if (
+      selectedNode.type !== 'Dense' &&
+      selectedNode.type !== 'Conv2D' &&
+      selectedNode.type !== 'Output'
+    ) {
+      return
+    }
     updateNodeConfig(selectedNodeId, { activation: nextActivation })
     setHasValidatedModel(false)
   }
@@ -695,12 +789,21 @@ function App() {
       if (trainingStatus !== 'complete') {
         throw new Error('Wait for training to complete before inferencing.')
       }
+      if (usesImageInferenceSamples && !selectedInferenceSample) {
+        throw new Error(
+          inferenceSamplesError ??
+            'No Cats vs Dogs sample selected. Wait for samples to load, then select an image.'
+        )
+      }
+      const inferInputs = usesImageInferenceSamples
+        ? selectedInferenceSample!.inputs
+        : inferenceGridToPayload(inferenceGrid)
 
       const response = await requestJson<InferResponse>('/api/model/infer', {
         method: 'POST',
         body: JSON.stringify({
           job_id: trainingJobId,
-          inputs: inferenceGridToPayload(inferenceGrid),
+          inputs: inferInputs,
           return_probabilities: true,
         }),
       })
@@ -710,7 +813,7 @@ function App() {
       setActiveTab('infer')
       setBackendMessage(
         nextPrediction !== undefined
-          ? `Inference complete. Predicted class ${nextPrediction}.`
+          ? `Inference complete. Predicted class ${predictionLabelForDataset(trainingConfig.dataset, nextPrediction)}.`
           : 'Inference complete.'
       )
     })
@@ -772,13 +875,22 @@ function App() {
       if (deployment.status !== 'running') {
         throw new Error('Deployment is not running.')
       }
+      if (usesImageInferenceSamples && !selectedInferenceSample) {
+        throw new Error(
+          inferenceSamplesError ??
+            'No Cats vs Dogs sample selected. Wait for samples to load, then select an image.'
+        )
+      }
+      const inferInputs = usesImageInferenceSamples
+        ? selectedInferenceSample!.inputs
+        : inferenceGridToPayload(inferenceGrid)
 
       const response = await requestJson<DeploymentInferResponse>(
         `/api/deploy/${deployment.deployment_id}/infer`,
         {
           method: 'POST',
           body: JSON.stringify({
-            inputs: inferenceGridToPayload(inferenceGrid),
+            inputs: inferInputs,
             return_probabilities: true,
           }),
         }
@@ -881,7 +993,9 @@ function App() {
               }
               sizeFieldLabel={selectedNode?.type === 'Input' ? 'Image Size' : 'Size'}
               canEditActivation={
-                selectedNode?.type === 'Dense' || selectedNode?.type === 'Output'
+                selectedNode?.type === 'Dense' ||
+                selectedNode?.type === 'Conv2D' ||
+                selectedNode?.type === 'Output'
               }
               canEditUnits={selectedNode?.type === 'Dense'}
               canEditDropoutRate={selectedNode?.type === 'Dropout'}
@@ -935,6 +1049,7 @@ function App() {
               testLossSeries={testLossSeries}
               trainAccuracySeries={trainAccuracySeries}
               testAccuracySeries={testAccuracySeries}
+              lossLandscape={lossLandscape}
               isTraining={trainingStatus === 'training'}
               onStopModel={handleStopModel}
               stopDisabled={isBackendBusy || !trainingJobId}
@@ -947,12 +1062,23 @@ function App() {
 
           {activeTab === 'infer' ? (
             <TestTab
+              datasetId={trainingConfig.dataset}
               inferenceGrid={inferenceGrid}
               setInferenceGrid={setInferenceGrid}
               padDisabled={isBackendBusy || !trainingJobId || trainingStatus !== 'complete'}
               inferenceTopPrediction={inferenceTopPrediction}
+              imageSamples={inferenceSamples}
+              selectedImageSampleId={selectedInferenceSampleId}
+              onSelectImageSample={setSelectedInferenceSampleId}
+              imageSamplesLoading={inferenceSamplesLoading}
+              imageSamplesError={inferenceSamplesError}
               onInferModel={handleInferModel}
-              inferDisabled={isBackendBusy || !trainingJobId || trainingStatus !== 'complete'}
+              inferDisabled={
+                isBackendBusy ||
+                !trainingJobId ||
+                trainingStatus !== 'complete' ||
+                requiresImageSampleSelection
+              }
               inferLabel={backendBusyAction === 'infer' ? 'Inferencing...' : 'Run Inference'}
             />
           ) : null}
@@ -980,7 +1106,12 @@ function App() {
               }
               refreshDisabled={isBackendBusy || !deployment}
               stopDisabled={isBackendBusy || !deployment || deployment.status !== 'running'}
-              inferDisabled={isBackendBusy || !deployment || deployment.status !== 'running'}
+              inferDisabled={
+                isBackendBusy ||
+                !deployment ||
+                deployment.status !== 'running' ||
+                requiresImageSampleSelection
+              }
               deployLabel={
                 backendBusyAction === 'deploy'
                   ? 'Deploying...'
@@ -1054,7 +1185,7 @@ function App() {
           }`}
           aria-pressed={isLowDetailMode}
           aria-label="Toggle low detail mode"
-          title="Reduce connection line detail for better performance"
+          title="Reduce neuron and connection render detail for better performance"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -1250,6 +1381,25 @@ function getLayerSizeLabel(node: LayerNode): string {
 
   if (node.type === 'Flatten') {
     return 'Flatten'
+  }
+
+  if (node.type === 'Conv2D') {
+    const filters = toPositiveInt(node.config.filters, 0)
+    const kernel = toPositiveInt(node.config.kernel_size, 0)
+    const stride = toPositiveInt(node.config.stride, 1)
+    if (filters > 0 && kernel > 0) {
+      return `${filters} @ ${kernel}x${kernel} / s${stride}`
+    }
+    return 'Conv2D'
+  }
+
+  if (node.type === 'MaxPool2D') {
+    const kernel = toPositiveInt(node.config.kernel_size, 0)
+    const stride = toPositiveInt(node.config.stride, kernel > 0 ? kernel : 1)
+    if (kernel > 0) {
+      return `${kernel}x${kernel} / s${stride}`
+    }
+    return 'MaxPool2D'
   }
 
   const rows = toPositiveInt(node.config.rows, DEFAULT_LAYER_ROWS)

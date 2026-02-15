@@ -121,16 +121,29 @@ def _to_inference_tensor(raw_inputs: Any, expected_shape: list[int] | None) -> t
 
     expected_rank = len(expected_shape)
     expected_elems = math.prod(expected_shape)
+    expected_channels = int(expected_shape[0]) if expected_rank >= 3 else None
 
-    # Accept a common shorthand for single-channel images:
-    # [H, W] -> [1, H, W] before adding batch.
+    # Accept shorthand image payloads:
+    # [H, W] -> [C, H, W] (repeat channel if needed) before adding batch.
     if (
-        expected_rank >= 2
-        and expected_shape[0] == 1
-        and tensor.ndim == expected_rank - 1
+        expected_rank == 3
+        and tensor.ndim == 2
         and list(tensor.shape) == expected_shape[1:]
     ):
         tensor = tensor.unsqueeze(0)
+        if expected_channels and expected_channels > 1:
+            tensor = tensor.repeat(expected_channels, 1, 1)
+
+    # Accept [1, H, W] for RGB models by repeating channel.
+    if (
+        expected_rank == 3
+        and tensor.ndim == 3
+        and tensor.shape[0] == 1
+        and expected_channels
+        and expected_channels > 1
+        and list(tensor.shape[1:]) == expected_shape[1:]
+    ):
+        tensor = tensor.repeat(expected_channels, 1, 1)
 
     if tensor.ndim == expected_rank:
         return tensor.unsqueeze(0)

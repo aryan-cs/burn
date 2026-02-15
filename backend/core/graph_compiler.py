@@ -161,6 +161,98 @@ def compile_graph(graph: GraphSpec, training: TrainingConfig) -> CompiledGraphRe
             )
             continue
 
+        if node.type == LayerType.CONV2D:
+            if not in_shape or len(in_shape) != 3:
+                raise GraphCompileError(
+                    [
+                        {
+                            "node_id": node_id,
+                            "message": "Conv2D requires rank-3 input [channels, height, width]",
+                            "expected": [">0", ">0", ">0"],
+                            "got": in_shape,
+                        }
+                    ]
+                )
+            in_channels = int(in_shape[0])
+            filters = int(node.config.get("filters", 0))
+            kernel_size = int(node.config.get("kernel_size", 0))
+            stride = int(node.config.get("stride", 1))
+            padding = int(node.config.get("padding", 0))
+
+            conv_attr = f"layer_{step_counter}_{_sanitize_identifier(node_id)}_conv"
+            conv_expr = (
+                f"nn.Conv2d({in_channels}, {filters}, kernel_size={kernel_size}, "
+                f"stride={stride}, padding={padding})"
+            )
+            conv_step = CompiledStep(
+                node_id=node_id,
+                node_type=node.type.value,
+                attr_name=conv_attr,
+                expression=conv_expr,
+                module=nn.Conv2d(
+                    in_channels=in_channels,
+                    out_channels=filters,
+                    kernel_size=kernel_size,
+                    stride=stride,
+                    padding=padding,
+                ),
+            )
+            steps.append(conv_step)
+            step_counter += 1
+
+            module_desc = [conv_expr]
+            activation = node.config.get("activation", "relu")
+            act_module, act_expr = _activation_module(str(activation) if activation is not None else None)
+            if act_module is not None and act_expr is not None:
+                act_attr = f"layer_{step_counter}_{_sanitize_identifier(node_id)}_act"
+                act_step = CompiledStep(
+                    node_id=node_id,
+                    node_type=node.type.value,
+                    attr_name=act_attr,
+                    expression=act_expr,
+                    module=act_module,
+                )
+                steps.append(act_step)
+                step_counter += 1
+                module_desc.append(act_expr)
+
+            summary_layers.append(
+                {
+                    "node_id": node_id,
+                    "type": node.type.value,
+                    "input_shape": in_shape,
+                    "output_shape": out_shape,
+                    "module": " -> ".join(module_desc),
+                }
+            )
+            continue
+
+        if node.type == LayerType.MAXPOOL2D:
+            kernel_size = int(node.config.get("kernel_size", 0))
+            stride = int(node.config.get("stride", kernel_size))
+            padding = int(node.config.get("padding", 0))
+            attr = f"layer_{step_counter}_{_sanitize_identifier(node_id)}"
+            expr = f"nn.MaxPool2d(kernel_size={kernel_size}, stride={stride}, padding={padding})"
+            step = CompiledStep(
+                node_id=node_id,
+                node_type=node.type.value,
+                attr_name=attr,
+                expression=expr,
+                module=nn.MaxPool2d(kernel_size=kernel_size, stride=stride, padding=padding),
+            )
+            steps.append(step)
+            step_counter += 1
+            summary_layers.append(
+                {
+                    "node_id": node_id,
+                    "type": node.type.value,
+                    "input_shape": in_shape,
+                    "output_shape": out_shape,
+                    "module": expr,
+                }
+            )
+            continue
+
         if node.type == LayerType.DROPOUT:
             rate = float(node.config.get("rate", 0.5))
             attr = f"layer_{step_counter}_{_sanitize_identifier(node_id)}"
@@ -264,6 +356,8 @@ def compile_graph(graph: GraphSpec, training: TrainingConfig) -> CompiledGraphRe
                     "expected": [
                         LayerType.INPUT.value,
                         LayerType.DENSE.value,
+                        LayerType.CONV2D.value,
+                        LayerType.MAXPOOL2D.value,
                         LayerType.DROPOUT.value,
                         LayerType.FLATTEN.value,
                         LayerType.OUTPUT.value,

@@ -32,6 +32,38 @@ def test_datasets_endpoint_lists_digits(client) -> None:
     assert {"mnist", "digits"}.issubset(dataset_ids)
 
 
+def test_model_inference_samples_for_cats_vs_dogs(monkeypatch, client) -> None:
+    def fake_samples(limit: int, split: str):
+        assert split == "test"
+        assert limit == 3
+        return [
+            {
+                "id": "test:0:cat.jpg",
+                "filename": "cat.jpg",
+                "label": 0,
+                "label_name": "cat",
+                "image_data_url": "data:image/jpeg;base64,AAA",
+                "inputs": [[[0.0]]],
+            }
+        ]
+
+    monkeypatch.setattr("routers.model.get_cats_vs_dogs_inference_samples", fake_samples)
+
+    response = client.get("/api/model/inference-samples?dataset=cats_vs_dogs&split=test&limit=3")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dataset"] == "cats_vs_dogs"
+    assert payload["split"] == "test"
+    assert payload["classes"] == [{"index": 0, "name": "cat"}, {"index": 1, "name": "dog"}]
+    assert payload["samples"][0]["label_name"] == "cat"
+
+
+def test_model_inference_samples_rejects_unsupported_dataset(client) -> None:
+    response = client.get("/api/model/inference-samples?dataset=mnist")
+    assert response.status_code == 400
+    assert "cats_vs_dogs" in response.json()["detail"]["message"]
+
+
 def test_model_latest_endpoint(monkeypatch, client, tmp_path) -> None:
     monkeypatch.setattr("routers.model.ARTIFACTS_DIR", tmp_path)
 

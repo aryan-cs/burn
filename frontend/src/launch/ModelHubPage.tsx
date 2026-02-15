@@ -142,10 +142,10 @@ const PRESET_CARDS: LaunchCard[] = [
     tone: 'linreg',
   },
   {
-    title: 'Home Value Tiny Regressor',
+    title: 'Diabetes BMI Regressor',
     subtitle: 'Preset Project',
-    description: 'Simple housing-style price regression with one input feature (area).',
-    href: '/linreg?mode=preset&template=home_value_baseline',
+    description: 'Real sklearn diabetes subset: predict one-year disease progression from BMI.',
+    href: '/linreg?mode=preset&template=diabetes_bmi_baseline',
     badge: LINREG,
     tone: 'linreg',
   },

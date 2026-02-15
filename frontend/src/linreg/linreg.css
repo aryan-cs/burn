@@ -190,9 +190,10 @@
 
 .linreg-viewport-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  grid-template-columns: minmax(0, 1.8fr) minmax(300px, 0.7fr);
   gap: 12px;
   min-height: 0;
+  align-items: stretch;
 }
 
 .linreg-viewport-card {
@@ -203,6 +204,10 @@
   padding: 12px;
   display: flex;
   flex-direction: column;
+}
+
+.linreg-viewport-card:first-child {
+  min-height: clamp(520px, 66vh, 860px);
 }
 
 .linreg-viewport-card h3 {
@@ -221,29 +226,35 @@
 .linreg-scatter-svg {
   width: 100%;
   height: 100%;
-  min-height: 280px;
+  min-height: clamp(460px, 60vh, 760px);
 }
 
 .linreg-scatter-bg {
-  fill: rgba(9, 11, 14, 0.95);
-  stroke: rgba(255, 255, 255, 0.1);
-  stroke-width: 1;
+  fill: rgba(4, 9, 15, 0.96);
+  stroke: rgba(116, 169, 255, 0.2);
+  stroke-width: 1.2;
 }
 
 .linreg-scatter-axis {
-  stroke: rgba(255, 255, 255, 0.4);
+  stroke: rgba(203, 226, 255, 0.48);
+  stroke-width: 1.2;
+}
+
+.linreg-scatter-grid {
+  stroke: rgba(129, 167, 216, 0.12);
   stroke-width: 1;
 }
 
 .linreg-scatter-point {
-  fill: rgba(255, 180, 41, 0.72);
-  stroke: rgba(255, 224, 165, 0.9);
-  stroke-width: 0.6;
+  fill: rgba(255, 190, 74, 0.82);
+  stroke: rgba(255, 229, 170, 0.95);
+  stroke-width: 0.7;
 }
 
 .linreg-scatter-fit-line {
-  stroke: rgba(116, 228, 126, 0.95);
-  stroke-width: 2.2;
+  stroke: rgba(96, 255, 171, 0.97);
+  stroke-width: 2.6;
+  filter: drop-shadow(0 0 8px rgba(92, 255, 160, 0.28));
 }
 
 .linreg-scatter-cursor {
@@ -259,13 +270,27 @@
 }
 
 .linreg-scatter-label {
-  fill: rgba(255, 255, 255, 0.78);
-  font-size: 10px;
+  fill: rgba(229, 242, 255, 0.82);
+  font-size: 11px;
   letter-spacing: 0.04em;
   font-family:
     "IBM Plex Mono",
     "JetBrains Mono",
     monospace;
+}
+
+.linreg-scatter-tick {
+  fill: rgba(210, 229, 255, 0.7);
+  font-size: 10px;
+  text-anchor: end;
+  font-family:
+    "IBM Plex Mono",
+    "JetBrains Mono",
+    monospace;
+}
+
+.linreg-scatter-tick-x {
+  text-anchor: middle;
 }
 
 .linreg-scatter-empty {

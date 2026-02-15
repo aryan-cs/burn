@@ -7,6 +7,7 @@ interface DeploymentInfo {
   status: string
   target: string
   endpoint_path: string
+  model_family?: string
   created_at: string
   last_used_at?: string | null
   request_count: number
@@ -104,7 +105,7 @@ export default function DeploymentsPage() {
       setSelected(null)
       setLogs([])
       if (!silent) {
-        setMessage('No deployments found. Train a model and deploy it from the NN Deploy tab.')
+        setMessage('No deployments found. Train and deploy a model from any builder tab.')
       }
       return
     }
@@ -202,7 +203,10 @@ export default function DeploymentsPage() {
 
   const inferSelected = () =>
     runAction('infer', async () => {
-      if (!selectedId) throw new Error('Select a deployment first.')
+      if (!selectedId || !selectedFromList) throw new Error('Select a deployment first.')
+      if (!isNnDeployment(selectedFromList)) {
+        throw new Error('Manager inference button currently supports NN deployments only.')
+      }
       const response = await requestJson<DeploymentInferResponse>(`/api/deploy/${selectedId}/infer`, {
         method: 'POST',
         body: JSON.stringify({
@@ -271,7 +275,7 @@ export default function DeploymentsPage() {
                     </span>
                   </div>
                   <div className="deployments-item-sub">
-                    id: {deployment.deployment_id.slice(0, 10)} · job: {deployment.job_id.slice(0, 10)} · req: {deployment.request_count}
+                    id: {deployment.deployment_id.slice(0, 10)} · {getModelFamilyLabel(deployment.model_family)} · job: {deployment.job_id.slice(0, 10)} · req: {deployment.request_count}
                   </div>
                 </button>
               ))
@@ -308,10 +312,23 @@ export default function DeploymentsPage() {
                   <button
                     type="button"
                     onClick={inferSelected}
-                    disabled={busyAction !== null || !selectedFromList || selectedFromList.status !== 'running'}
+                    disabled={
+                      busyAction !== null ||
+                      !selectedFromList ||
+                      selectedFromList.status !== 'running' ||
+                      !isNnDeployment(selectedFromList)
+                    }
                     className="deployments-btn deployments-icon-btn"
                     aria-label={busyAction === 'infer' ? 'Inferencing...' : 'Run Test Inference'}
-                    title={busyAction === 'infer' ? 'Inferencing...' : 'Run Test Inference'}
+                    title={
+                      !selectedFromList
+                        ? 'Run Test Inference'
+                        : !isNnDeployment(selectedFromList)
+                          ? 'Inference button is currently available for NN deployments only'
+                          : busyAction === 'infer'
+                            ? 'Inferencing...'
+                            : 'Run Test Inference'
+                    }
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M200-120q-51 0-72.5-45.5T138-250l222-270v-240h-40q-17 0-28.5-11.5T280-800q0-17 11.5-28.5T320-840h320q17 0 28.5 11.5T680-800q0 17-11.5 28.5T640-760h-40v240l222 270q32 39 10.5 84.5T760-120H200Zm0-80h560L520-492v-268h-80v268L200-200Zm280-280Z"/></svg>
                   </button>
@@ -338,6 +355,7 @@ export default function DeploymentsPage() {
                     <div><span>Job ID</span><code>{selected.job_id}</code></div>
                     <div><span>Status</span><code>{selected.status}</code></div>
                     <div><span>Target</span><code>{selected.target}</code></div>
+                    <div><span>Model Family</span><code>{getModelFamilyLabel(selected.model_family)}</code></div>
                     <div><span>Endpoint</span><code>{selected.endpoint_path}</code></div>
                     <div><span>Requests</span><code>{selected.request_count}</code></div>
                     <div><span>Created</span><code>{formatDateTime(selected.created_at)}</code></div>
@@ -404,7 +422,21 @@ function getDeploymentDisplayName(deployment: DeploymentInfo | null): string {
   if (deployment.name && deployment.name.trim().length > 0) {
     return deployment.name.trim()
   }
+  if ((deployment.model_family ?? '').toLowerCase() === 'linreg') {
+    return `Local Linear Regression Endpoint (${deployment.job_id.slice(0, 8)})`
+  }
   return `Local NN Endpoint (${deployment.job_id.slice(0, 8)})`
+}
+
+function getModelFamilyLabel(modelFamily: string | undefined): string {
+  const normalized = (modelFamily ?? 'nn').toLowerCase()
+  if (normalized === 'linreg') return 'Linear Regression'
+  if (normalized === 'nn') return 'Neural Network'
+  return normalized.toUpperCase()
+}
+
+function isNnDeployment(deployment: DeploymentInfo): boolean {
+  return (deployment.model_family ?? 'nn').toLowerCase() === 'nn'
 }
 
 function createZeroMnistSample(): number[][] {

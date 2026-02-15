@@ -24,6 +24,7 @@ export interface WeightSnapshot {
 
 interface TrainingConfig {
   dataset: string
+  location: 'local' | 'cloud'
   epochs: number
   batchSize: number
   optimizer: string
@@ -52,6 +53,7 @@ interface TrainingState {
 
 const DEFAULT_CONFIG: TrainingConfig = {
   dataset: 'mnist',
+  location: 'cloud',
   epochs: 20,
   batchSize: 64,
   optimizer: 'adam',

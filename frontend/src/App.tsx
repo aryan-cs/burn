@@ -667,7 +667,8 @@ function App() {
         throw new Error('Add at least one layer before training.')
       }
 
-      const response = await requestJson<TrainResponse>('/api/model/train', {
+      const trainLocation = trainingConfig.location === 'local' ? 'local' : 'cloud'
+      const response = await requestJson<TrainResponse>(`/api/model/train?location=${trainLocation}`, {
         method: 'POST',
         body: JSON.stringify(payload),
       })
@@ -931,6 +932,7 @@ function App() {
               trainingConfig={trainingConfig}
               isBackendBusy={isBackendBusy}
               onDatasetChange={(value) => setTrainingConfig({ dataset: value })}
+              onLocationChange={(value) => setTrainingConfig({ location: value })}
               onEpochsChange={(value) => setTrainingConfig({ epochs: value })}
               onBatchSizeChange={(value) => setTrainingConfig({ batchSize: value })}
               onOptimizerChange={(value) => setTrainingConfig({ optimizer: value })}

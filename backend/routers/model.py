@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import torch
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Query
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
@@ -30,6 +30,14 @@ from models.training_config import normalize_training_config
 
 router = APIRouter(prefix="/api/model", tags=["model"])
 ARTIFACTS_DIR = Path(__file__).resolve().parents[1] / "artifacts"
+
+
+def _resolve_reported_training_backend(location: Literal["local", "cloud"] | None) -> str:
+    if location == "cloud":
+        return "modal"
+    if location == "local":
+        return "local"
+    return os.getenv("TRAINING_BACKEND", "modal").strip().lower()
 
 
 class StopRequest(BaseModel):
@@ -219,7 +227,10 @@ async def compile_model(graph: GraphSpec):
 
 
 @router.post("/train")
-async def train_model(graph: GraphSpec):
+async def train_model(
+    graph: GraphSpec,
+    location: Literal["local", "cloud"] | None = Query(default=None),
+):
     training = normalize_training_config(graph.training)
 
     if get_dataset_meta(training.dataset) is None:
@@ -260,13 +271,21 @@ async def train_model(graph: GraphSpec):
         await job_registry.mark_terminal(entry.job_id, "failed", error=f"Failed to persist job bundle: {exc}")
         raise HTTPException(status_code=500, detail={"message": f"Failed to persist job bundle: {exc}"}) from exc
 
-    task = asyncio.create_task(run_training_job(entry.job_id, compiled, training, ARTIFACTS_DIR))
+    task = asyncio.create_task(
+        run_training_job(
+            entry.job_id,
+            compiled,
+            training,
+            ARTIFACTS_DIR,
+            backend_override=location,
+        )
+    )
     job_registry.set_task(entry.job_id, task)
 
     return {
         "job_id": entry.job_id,
         "status": entry.status,
-        "training_backend": os.getenv("TRAINING_BACKEND", "modal").strip().lower(),
+        "training_backend": _resolve_reported_training_backend(location),
         "modal_app_name": os.getenv("MODAL_APP_NAME", "burn-training"),
         "modal_function_name": os.getenv("MODAL_FUNCTION_NAME", "train_job_remote"),
     }

@@ -106,6 +106,7 @@ async def run_training_job(
     compiled: CompiledGraphResult,
     training: TrainingConfig,
     artifacts_dir: Path,
+    backend_override: str | None = None,
 ) -> None:
     entry = job_registry.get(job_id)
     if entry is None:
@@ -118,7 +119,7 @@ async def run_training_job(
         model = compiled.model
         device = torch.device("cpu")
         model.to(device)
-        backend = os.getenv("TRAINING_BACKEND", "modal").strip().lower()
+        backend = _resolve_training_backend(backend_override)
         await job_registry.publish(
             job_id,
             {
@@ -475,3 +476,15 @@ async def _publish_modal_epoch_update(
             "weights": None,
         },
     )
+
+
+def _resolve_training_backend(backend_override: str | None) -> str:
+    if backend_override is not None:
+        normalized = backend_override.strip().lower()
+        if normalized == "cloud":
+            return "modal"
+        if normalized == "local":
+            return "local"
+        if normalized:
+            return normalized
+    return os.getenv("TRAINING_BACKEND", "modal").strip().lower()

@@ -8,7 +8,7 @@ from tests.conftest import build_graph_payload
 
 
 def test_websocket_streams_epoch_and_done(monkeypatch, client) -> None:
-    async def fake_run_training_job(job_id, compiled, training, artifacts_dir):
+    async def fake_run_training_job(job_id, compiled, training, artifacts_dir, backend_override=None):
         job_registry.set_status(job_id, "running")
         await job_registry.publish(
             job_id,
@@ -55,7 +55,7 @@ def test_websocket_streams_epoch_and_done(monkeypatch, client) -> None:
 
 
 def test_websocket_streams_error(monkeypatch, client) -> None:
-    async def fake_run_training_job(job_id, compiled, training, artifacts_dir):
+    async def fake_run_training_job(job_id, compiled, training, artifacts_dir, backend_override=None):
         job_registry.set_status(job_id, "running")
         await job_registry.publish(job_id, {"type": "error", "message": "boom"})
         await job_registry.mark_terminal(job_id, "failed", error="boom")

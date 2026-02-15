@@ -5,10 +5,16 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
 from routers.datasets import router as datasets_router
 from routers.model import router as model_router
 from routers.websocket import router as websocket_router
+from routers.ml_model import router as ml_model_router
+from routers.ml_websocket import router as ml_ws_router
+from routers.ai_coach import router as ai_coach_router
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 
 @asynccontextmanager
@@ -31,6 +37,9 @@ app.add_middleware(
 app.include_router(model_router)
 app.include_router(datasets_router)
 app.include_router(websocket_router)
+app.include_router(ml_model_router)
+app.include_router(ml_ws_router)
+app.include_router(ai_coach_router)
 
 
 @app.get("/health")

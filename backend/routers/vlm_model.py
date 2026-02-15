@@ -11,6 +11,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from PIL import Image
 
 from core.vlm_architecture import load_vlm_architecture_spec
+from core.compute_node_client import ComputeNodeError, compute_node_client
 from core.vlm_registry import VLMJobEntry, vlm_job_registry
 from core.vlm_runtime import DEFAULT_VLM_MODEL_ID, vlm_runtime
 from core.vlm_training_engine import run_vlm_training_job
@@ -272,8 +273,40 @@ async def vlm_latest() -> dict[str, Any]:
 
 @router.post("/infer")
 async def vlm_infer(payload: VLMInferRequest) -> dict[str, Any]:
-    image = _decode_data_url_image(payload.image_base64)
     resolved_job_id, artifact_path, model_id = _resolve_job_artifact(payload.job_id)
+
+    remote_warning: str | None = None
+    if artifact_path is None and compute_node_client.enabled:
+        try:
+            remote_response = await compute_node_client.infer(
+                image_base64=payload.image_base64,
+                model_id=model_id,
+                score_threshold=payload.score_threshold,
+                max_detections=payload.max_detections,
+            )
+            remote_backend = str(
+                remote_response.get("runtime_backend")
+                or remote_response.get("backend")
+                or "unknown"
+            )
+            remote_model_id = str(
+                remote_response.get("runtime_model_id")
+                or remote_response.get("model_id")
+                or model_id
+            )
+            return {
+                "job_id_used": resolved_job_id,
+                "runtime_backend": f"remote:{remote_backend}",
+                "runtime_model_id": remote_model_id,
+                "image_width": int(remote_response.get("image_width", 0)),
+                "image_height": int(remote_response.get("image_height", 0)),
+                "detections": remote_response.get("detections", []),
+                "warning": remote_response.get("warning"),
+            }
+        except ComputeNodeError as exc:
+            remote_warning = f"Remote compute node unavailable ({exc}); using local backend."
+
+    image = _decode_data_url_image(payload.image_base64)
     runtime = vlm_runtime.ensure_model(model_id)
     detection = vlm_runtime.detect(
         image,
@@ -281,6 +314,11 @@ async def vlm_infer(payload: VLMInferRequest) -> dict[str, Any]:
         max_detections=payload.max_detections,
         artifact_path=artifact_path,
     )
+    warning = detection.get("warning")
+    if remote_warning and warning:
+        warning = f"{remote_warning} {warning}"
+    elif remote_warning:
+        warning = remote_warning
     return {
         "job_id_used": resolved_job_id,
         "runtime_backend": runtime.backend,
@@ -288,5 +326,5 @@ async def vlm_infer(payload: VLMInferRequest) -> dict[str, Any]:
         "image_width": detection["image_width"],
         "image_height": detection["image_height"],
         "detections": detection["detections"],
-        "warning": detection.get("warning"),
+        "warning": warning,
     }

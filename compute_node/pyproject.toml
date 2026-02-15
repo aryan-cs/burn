@@ -1,0 +1,16 @@
+[project]
+name = "compute-node"
+version = "0.1.0"
+description = "Remote VLM inference compute node"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.116.0",
+    "httpx>=0.28.0",
+    "pydantic>=2.11.0",
+    "pillow>=10.4.0",
+    "torch>=2.9.0",
+    "torchvision>=0.24.0",
+    "transformers>=4.57.0",
+    "uvicorn>=0.35.0",
+]

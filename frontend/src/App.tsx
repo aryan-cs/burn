@@ -106,7 +106,7 @@ interface DeploymentInferResponse {
 
 type DashboardTab = 'validate' | 'train' | 'infer' | 'deploy'
 type BuildStatus = 'idle' | 'success' | 'error'
-type DeployTarget = 'local' | 'modal'
+type DeployTarget = 'local' | 'modal' | 'sandbox'
 
 async function requestJson<T>(
   path: string,
@@ -1117,7 +1117,9 @@ function App() {
                   ? 'Deploying...'
                   : deployTarget === 'modal'
                     ? 'Deploy to Modal'
-                    : 'Deploy Locally'
+                    : deployTarget === 'sandbox'
+                      ? 'Deploy to Modal Sandbox'
+                      : 'Deploy Locally'
               }
               refreshLabel={backendBusyAction === 'deploy_status' ? 'Refreshing...' : 'Refresh'}
               stopLabel={backendBusyAction === 'deploy_stop' ? 'Stopping...' : 'Stop Deploy'}

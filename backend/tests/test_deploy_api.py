@@ -296,3 +296,110 @@ def test_create_modal_deployment_and_proxy_infer(monkeypatch, client, tmp_path) 
     assert logs_res.status_code == 200
     events = [entry["event"] for entry in logs_res.json()["logs"]]
     assert "modal_endpoint_registered" in events
+
+
+def test_create_modal_sandbox_deployment_and_proxy_infer(monkeypatch, client, tmp_path) -> None:
+    async def fake_run_training_job(job_id, compiled, training, artifacts_dir, backend_override=None):
+        entry = job_registry.get(job_id)
+        assert entry is not None
+        job_registry.set_status(job_id, "running")
+        artifact_dir = entry.job_dir or tmp_path
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = artifact_dir / "model.pt"
+        torch.save(entry.model.state_dict(), artifact_path)
+        await asyncio.sleep(0.02)
+        await job_registry.mark_terminal(
+            job_id,
+            "completed",
+            final_metrics={"final_loss": 0.1, "final_accuracy": 0.9},
+            artifact_path=artifact_path,
+        )
+
+    monkeypatch.setattr("routers.model.run_training_job", fake_run_training_job)
+    monkeypatch.setattr("routers.model.ARTIFACTS_DIR", tmp_path)
+    monkeypatch.setattr("routers.deploy.ARTIFACTS_DIR", tmp_path)
+
+    class FakeRegisterSandboxFunction:
+        def __init__(self):
+            self.calls = []
+
+        def remote(self, deployment_id, graph_payload, training_payload, state_dict_b64, input_shape):
+            self.calls.append(deployment_id)
+            return {"deployment_id": deployment_id, "status": "ready"}
+
+    class FakeInferSandboxFunction:
+        def get_web_url(self):
+            return "https://burn-example.modal.run/sandbox-infer"
+
+        def remote(self, payload):
+            return {
+                "deployment_id": payload["deployment_id"],
+                "input_shape": [1, 1, 28, 28],
+                "output_shape": [1, 10],
+                "logits": [[0.0 for _ in range(10)]],
+                "predictions": [3],
+                "probabilities": [[0.1 for _ in range(10)]],
+            }
+
+    class FakeUnregisterSandboxFunction:
+        def __init__(self):
+            self.calls = []
+
+        def remote(self, deployment_id):
+            self.calls.append(deployment_id)
+            return {"deployment_id": deployment_id, "status": "deleted"}
+
+    register_fn = FakeRegisterSandboxFunction()
+    infer_fn = FakeInferSandboxFunction()
+    unregister_fn = FakeUnregisterSandboxFunction()
+
+    class FakeFunctionNamespace:
+        @staticmethod
+        def from_name(app_name: str, fn_name: str, environment_name=None):
+            assert app_name == "burn-training"
+            assert environment_name is None
+            if fn_name == "register_sandbox_deployment_remote":
+                return register_fn
+            if fn_name == "infer_sandbox_deployment_remote":
+                return infer_fn
+            if fn_name == "unregister_sandbox_deployment_remote":
+                return unregister_fn
+            raise AssertionError(f"Unexpected function name: {fn_name}")
+
+    fake_modal = types.ModuleType("modal")
+    fake_modal.Function = FakeFunctionNamespace
+    monkeypatch.setitem(__import__("sys").modules, "modal", fake_modal)
+
+    train_res = client.post("/api/model/train", json=build_graph_payload())
+    assert train_res.status_code == 200
+    job_id = train_res.json()["job_id"]
+    time.sleep(0.05)
+
+    deploy_res = client.post(
+        "/api/deploy",
+        json={"job_id": job_id, "target": "sandbox", "name": "mnist-sandbox-v1"},
+    )
+    assert deploy_res.status_code == 200
+    deploy_data = deploy_res.json()
+    deployment_id = deploy_data["deployment_id"]
+    assert deploy_data["target"] == "sandbox"
+    assert deploy_data["endpoint_path"] == "https://burn-example.modal.run/sandbox-infer"
+    assert deployment_id in register_fn.calls
+
+    infer_res = client.post(
+        f"/api/deploy/{deployment_id}/infer",
+        json={"inputs": [[[0.0 for _ in range(28)] for _ in range(28)]], "return_probabilities": True},
+    )
+    assert infer_res.status_code == 200
+    infer_data = infer_res.json()
+    assert infer_data["deployment_id"] == deployment_id
+    assert infer_data["job_id"] == job_id
+    assert infer_data["predictions"] == [3]
+
+    stop_res = client.delete(f"/api/deploy/{deployment_id}")
+    assert stop_res.status_code == 200
+    assert deployment_id in unregister_fn.calls
+
+    start_res = client.post(f"/api/deploy/{deployment_id}/start")
+    assert start_res.status_code == 200
+    assert register_fn.calls.count(deployment_id) >= 2

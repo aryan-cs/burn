@@ -36,6 +36,18 @@ MODAL_ENVIRONMENT_NAME = os.getenv("MODAL_ENVIRONMENT_NAME")
 MODAL_DEPLOY_REGISTER_FUNCTION = os.getenv("MODAL_DEPLOY_REGISTER_FUNCTION", "register_deployment_remote")
 MODAL_DEPLOY_UNREGISTER_FUNCTION = os.getenv("MODAL_DEPLOY_UNREGISTER_FUNCTION", "unregister_deployment_remote")
 MODAL_DEPLOY_INFER_FUNCTION = os.getenv("MODAL_DEPLOY_INFER_FUNCTION", "infer_deployment_remote")
+MODAL_SANDBOX_DEPLOY_REGISTER_FUNCTION = os.getenv(
+    "MODAL_SANDBOX_DEPLOY_REGISTER_FUNCTION",
+    "register_sandbox_deployment_remote",
+)
+MODAL_SANDBOX_DEPLOY_UNREGISTER_FUNCTION = os.getenv(
+    "MODAL_SANDBOX_DEPLOY_UNREGISTER_FUNCTION",
+    "unregister_sandbox_deployment_remote",
+)
+MODAL_SANDBOX_DEPLOY_INFER_FUNCTION = os.getenv(
+    "MODAL_SANDBOX_DEPLOY_INFER_FUNCTION",
+    "infer_sandbox_deployment_remote",
+)
 
 
 class CreateDeploymentRequest(BaseModel):
@@ -339,6 +351,20 @@ def _to_linreg_samples(raw_inputs: Any, expected_features: int) -> list[list[flo
     return samples
 
 
+def _resolve_modal_function_names(target: str) -> tuple[str, str, str]:
+    if target == "sandbox":
+        return (
+            MODAL_SANDBOX_DEPLOY_REGISTER_FUNCTION,
+            MODAL_SANDBOX_DEPLOY_UNREGISTER_FUNCTION,
+            MODAL_SANDBOX_DEPLOY_INFER_FUNCTION,
+        )
+    return (
+        MODAL_DEPLOY_REGISTER_FUNCTION,
+        MODAL_DEPLOY_UNREGISTER_FUNCTION,
+        MODAL_DEPLOY_INFER_FUNCTION,
+    )
+
+
 def _infer_linreg(deployment_id: str, entry: DeploymentEntry, payload: DeploymentInferenceRequest) -> dict[str, Any]:
     runtime = entry.runtime_config
     if not isinstance(runtime, dict):
@@ -406,10 +432,10 @@ async def create_deployment(payload: CreateDeploymentRequest) -> DeploymentStatu
     target = payload.target.strip().lower()
     if target == "cloud":
         target = "modal"
-    if target not in {"local", "modal"}:
+    if target not in {"local", "modal", "sandbox"}:
         raise HTTPException(
             status_code=400,
-            detail={"message": "Supported deployment targets are: local, modal"},
+            detail={"message": "Supported deployment targets are: local, modal, sandbox"},
         )
 
     if target == "local":
@@ -425,17 +451,18 @@ async def create_deployment(payload: CreateDeploymentRequest) -> DeploymentStatu
         return _entry_to_status(entry)
 
     graph_payload, training_payload, encoded_state, input_shape = _load_modal_deployment_bundle(payload.job_id)
+    register_fn_name, _, infer_fn_name = _resolve_modal_function_names(target)
     try:
         import modal
 
         register_fn = modal.Function.from_name(
             MODAL_APP_NAME,
-            MODAL_DEPLOY_REGISTER_FUNCTION,
+            register_fn_name,
             environment_name=MODAL_ENVIRONMENT_NAME,
         )
         infer_fn = modal.Function.from_name(
             MODAL_APP_NAME,
-            MODAL_DEPLOY_INFER_FUNCTION,
+            infer_fn_name,
             environment_name=MODAL_ENVIRONMENT_NAME,
         )
         endpoint_url = await asyncio.to_thread(infer_fn.get_web_url)
@@ -447,7 +474,7 @@ async def create_deployment(payload: CreateDeploymentRequest) -> DeploymentStatu
 
     entry = deployment_registry.create_deployment(
         job_id=payload.job_id,
-        target="modal",
+        target=target,
         name=payload.name,
         model=None,
         input_shape=input_shape,
@@ -458,8 +485,8 @@ async def create_deployment(payload: CreateDeploymentRequest) -> DeploymentStatu
         entry.deployment_id,
         level="info",
         event="modal_endpoint_registered",
-        message="Modal web endpoint registered for this deployment.",
-        details={"modal_web_url": endpoint_url},
+        message=f"Modal {target} web endpoint registered for this deployment.",
+        details={"modal_web_url": endpoint_url, "target": target},
     )
     try:
         await asyncio.to_thread(
@@ -544,13 +571,14 @@ async def stop_deployment(deployment_id: str) -> DeploymentStatusResponse:
     if entry is None:
         raise HTTPException(status_code=404, detail={"message": f"Unknown deployment_id: {deployment_id}"})
 
-    if entry.target == "modal":
+    if entry.target in {"modal", "sandbox"}:
+        _, unregister_fn_name, _ = _resolve_modal_function_names(entry.target)
         try:
             import modal
 
             unregister_fn = modal.Function.from_name(
                 MODAL_APP_NAME,
-                MODAL_DEPLOY_UNREGISTER_FUNCTION,
+                unregister_fn_name,
                 environment_name=MODAL_ENVIRONMENT_NAME,
             )
             await asyncio.to_thread(unregister_fn.remote, deployment_id)
@@ -571,14 +599,15 @@ async def start_deployment(deployment_id: str) -> DeploymentStatusResponse:
     if entry.status == "running":
         return _entry_to_status(entry)
 
-    if entry.target == "modal":
+    if entry.target in {"modal", "sandbox"}:
+        register_fn_name, _, _ = _resolve_modal_function_names(entry.target)
         graph_payload, training_payload, encoded_state, input_shape = _load_modal_deployment_bundle(entry.job_id)
         try:
             import modal
 
             register_fn = modal.Function.from_name(
                 MODAL_APP_NAME,
-                MODAL_DEPLOY_REGISTER_FUNCTION,
+                register_fn_name,
                 environment_name=MODAL_ENVIRONMENT_NAME,
             )
             await asyncio.to_thread(
@@ -611,13 +640,14 @@ async def infer_deployment(deployment_id: str, payload: DeploymentInferenceReque
         raise HTTPException(status_code=404, detail={"message": f"Unknown deployment_id: {deployment_id}"})
     if entry.status != "running":
         raise HTTPException(status_code=400, detail={"message": "Deployment is not running"})
-    if entry.target == "modal":
+    if entry.target in {"modal", "sandbox"}:
+        _, _, infer_fn_name = _resolve_modal_function_names(entry.target)
         try:
             import modal
 
             infer_fn = modal.Function.from_name(
                 MODAL_APP_NAME,
-                MODAL_DEPLOY_INFER_FUNCTION,
+                infer_fn_name,
                 environment_name=MODAL_ENVIRONMENT_NAME,
             )
             modal_response = await asyncio.to_thread(
@@ -633,8 +663,8 @@ async def infer_deployment(deployment_id: str, payload: DeploymentInferenceReque
                 deployment_id,
                 level="error",
                 event="inference_request_failed",
-                message="Modal inference request failed.",
-                details={"error": str(exc)},
+                message=f"Modal {entry.target} inference request failed.",
+                details={"error": str(exc), "target": entry.target},
             )
             raise HTTPException(status_code=500, detail={"message": f"Modal inference failed: {exc}"}) from exc
         if not isinstance(modal_response, dict):
@@ -646,9 +676,10 @@ async def infer_deployment(deployment_id: str, payload: DeploymentInferenceReque
             deployment_id,
             level="info",
             event="inference_request",
-            message="Inference request handled successfully via Modal.",
+            message=f"Inference request handled successfully via Modal {entry.target}.",
             details={
                 "request_count": entry.request_count,
+                "target": entry.target,
                 "input_shape": modal_response.get("input_shape"),
                 "output_shape": modal_response.get("output_shape"),
             },

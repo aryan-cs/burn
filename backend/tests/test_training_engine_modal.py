@@ -23,6 +23,24 @@ def _encode_state_dict(state_dict: dict[str, torch.Tensor]) -> str:
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
+class _FakeProgressDict:
+    def __init__(self):
+        self._values: dict[str, dict] = {}
+
+    def get(self, key: str):
+        return self._values.get(key)
+
+
+class _FakeDictNamespace:
+    _store = _FakeProgressDict()
+
+    @classmethod
+    def from_name(cls, name: str, environment_name=None):
+        assert name == "burn-training-progress"
+        assert environment_name is None
+        return cls._store
+
+
 def test_run_training_job_uses_modal_backend(monkeypatch, tmp_path) -> None:
     job_registry.clear()
     payload = build_graph_payload(
@@ -90,9 +108,10 @@ def test_run_training_job_uses_modal_backend(monkeypatch, tmp_path) -> None:
             self.cancelled = True
 
     class FakeRemoteFunction:
-        def spawn(self, graph_payload: dict, training_payload: dict) -> FakeCall:
+        def spawn(self, graph_payload: dict, training_payload: dict, job_id: str) -> FakeCall:
             assert graph_payload["nodes"][0]["type"] == "Input"
             assert training_payload["dataset"] == "digits"
+            assert isinstance(job_id, str) and len(job_id) > 0
             return FakeCall()
 
     class FakeFunctionNamespace:
@@ -105,6 +124,7 @@ def test_run_training_job_uses_modal_backend(monkeypatch, tmp_path) -> None:
 
     fake_modal = types.ModuleType("modal")
     fake_modal.Function = FakeFunctionNamespace
+    fake_modal.Dict = _FakeDictNamespace
     fake_modal_exception = types.ModuleType("modal.exception")
     fake_modal_exception.TimeoutError = TimeoutError
 
@@ -199,9 +219,10 @@ def test_run_training_job_loads_compiled_modal_state_dict(monkeypatch, tmp_path)
             self.cancelled = True
 
     class FakeRemoteFunction:
-        def spawn(self, graph_payload: dict, training_payload: dict) -> FakeCall:
+        def spawn(self, graph_payload: dict, training_payload: dict, job_id: str) -> FakeCall:
             assert graph_payload["nodes"][0]["type"] == "Input"
             assert training_payload["dataset"] == "digits"
+            assert isinstance(job_id, str) and len(job_id) > 0
             return FakeCall()
 
     class FakeFunctionNamespace:
@@ -214,6 +235,7 @@ def test_run_training_job_loads_compiled_modal_state_dict(monkeypatch, tmp_path)
 
     fake_modal = types.ModuleType("modal")
     fake_modal.Function = FakeFunctionNamespace
+    fake_modal.Dict = _FakeDictNamespace
     fake_modal_exception = types.ModuleType("modal.exception")
     fake_modal_exception.TimeoutError = TimeoutError
 
@@ -311,9 +333,10 @@ def test_run_training_job_tolerates_builtin_timeouterror(monkeypatch, tmp_path) 
             self.cancelled = True
 
     class FakeRemoteFunction:
-        def spawn(self, graph_payload: dict, training_payload: dict) -> FakeCall:
+        def spawn(self, graph_payload: dict, training_payload: dict, job_id: str) -> FakeCall:
             assert graph_payload["nodes"][0]["type"] == "Input"
             assert training_payload["dataset"] == "digits"
+            assert isinstance(job_id, str) and len(job_id) > 0
             return FakeCall()
 
     class FakeFunctionNamespace:
@@ -326,6 +349,7 @@ def test_run_training_job_tolerates_builtin_timeouterror(monkeypatch, tmp_path) 
 
     fake_modal = types.ModuleType("modal")
     fake_modal.Function = FakeFunctionNamespace
+    fake_modal.Dict = _FakeDictNamespace
     fake_modal_exception = types.ModuleType("modal.exception")
     fake_modal_exception.TimeoutError = type("FakeModalTimeoutError", (Exception,), {})
 

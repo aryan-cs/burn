@@ -18,6 +18,8 @@ from models.training_config import normalize_training_config
 
 
 app = modal.App("burn-training")
+PROGRESS_DICT_NAME = "burn-training-progress"
+progress_store = modal.Dict.from_name(PROGRESS_DICT_NAME, create_if_missing=True)
 image = modal.Image.debian_slim().pip_install(
     "kaggle>=2.0.0",
     "torch>=2.9.0",
@@ -81,6 +83,12 @@ def _state_dict_for_export(model: nn.Module) -> dict[str, torch.Tensor]:
     return inner_model.state_dict()
 
 
+def _publish_progress(job_id: str | None, payload: dict[str, Any]) -> None:
+    if not job_id:
+        return
+    progress_store[job_id] = payload
+
+
 def _evaluate_model(
     model: nn.Module,
     dataloader,
@@ -115,17 +123,31 @@ def _evaluate_model(
 
 
 @app.function(image=image, gpu="T4", timeout=60 * 20)
-def train_job_remote(graph_payload: dict[str, Any], training_payload: dict[str, Any]) -> dict[str, Any]:
+def train_job_remote(
+    graph_payload: dict[str, Any],
+    training_payload: dict[str, Any],
+    job_id: str | None = None,
+) -> dict[str, Any]:
     graph = GraphSpec.model_validate(graph_payload)
     training = normalize_training_config(training_payload)
     print(
         (
             "[modal][train_job_remote] start "
+            f"job_id={job_id or 'unknown'} "
             f"dataset={training.dataset} epochs={training.epochs} "
             f"batch_size={training.batch_size} optimizer={training.optimizer} "
             f"lr={training.learning_rate} loss={training.loss}"
         ),
         flush=True,
+    )
+    _publish_progress(
+        job_id,
+        {
+            "status": "running",
+            "epoch_metrics": [],
+            "final_metrics": None,
+            "error": None,
+        },
     )
 
     compiled = compile_graph(graph, training)
@@ -236,6 +258,15 @@ def train_job_remote(graph_payload: dict[str, Any], training_payload: dict[str, 
             ),
             flush=True,
         )
+        _publish_progress(
+            job_id,
+            {
+                "status": "running",
+                "epoch_metrics": metrics,
+                "final_metrics": None,
+                "error": None,
+            },
+        )
 
     buffer = io.BytesIO()
     state_dict_cpu = {k: v.detach().to("cpu") for k, v in _state_dict_for_export(model).items()}
@@ -244,22 +275,33 @@ def train_job_remote(graph_payload: dict[str, Any], training_payload: dict[str, 
     print(
         (
             "[modal][train_job_remote] complete "
+            f"job_id={job_id or 'unknown'} "
             f"epochs_ran={len(metrics)} final_test_loss={last_test_loss:.6f} "
             f"final_test_acc={last_test_accuracy:.4f}"
         ),
         flush=True,
     )
+    final_metrics = {
+        "final_train_loss": last_train_loss,
+        "final_train_accuracy": last_train_accuracy,
+        "final_test_loss": last_test_loss,
+        "final_test_accuracy": last_test_accuracy,
+        "final_loss": last_test_loss,
+        "final_accuracy": last_test_accuracy,
+    }
+    _publish_progress(
+        job_id,
+        {
+            "status": "completed",
+            "epoch_metrics": metrics,
+            "final_metrics": final_metrics,
+            "error": None,
+        },
+    )
 
     return {
         "epoch_metrics": metrics,
-        "final_metrics": {
-            "final_train_loss": last_train_loss,
-            "final_train_accuracy": last_train_accuracy,
-            "final_test_loss": last_test_loss,
-            "final_test_accuracy": last_test_accuracy,
-            "final_loss": last_test_loss,
-            "final_accuracy": last_test_accuracy,
-        },
+        "final_metrics": final_metrics,
         "state_dict_b64": encoded_state,
         "resolved_training": training.model_dump(),
     }

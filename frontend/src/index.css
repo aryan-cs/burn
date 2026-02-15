@@ -1975,83 +1975,63 @@ button {
 
 .nn-ai-coach-dock {
   --nn-ai-panel-width: min(360px, 36vw);
-  --nn-ai-handle-width: 44px;
   position: absolute;
   top: 18px;
   right: 0;
   bottom: 14px;
   z-index: 5;
-  width: calc(var(--nn-ai-panel-width) + var(--nn-ai-handle-width));
+  width: 0;
   pointer-events: none;
   overflow: visible;
 }
 
-.nn-ai-coach-side-toggle {
-  position: absolute;
-  top: 50%;
-  right: 0;
-  transform: translateY(-50%);
-  width: var(--nn-ai-handle-width);
-  height: 142px;
-  border: 1px solid var(--panel-border);
-  border-right: none;
-  border-radius: 10px 0 0 10px;
-  background: linear-gradient(
-    180deg,
-    rgba(24, 24, 24, 0.96),
-    rgba(13, 13, 13, 0.98)
-  );
-  color: rgba(255, 255, 255, 0.82);
-  box-shadow: -10px 0 24px rgba(0, 0, 0, 0.36);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
+.nn-ai-coach-dock-open {
+  z-index: 12;
   pointer-events: auto;
-  padding: 0;
-  cursor: pointer;
-  transition:
-    border-color 0.2s ease,
-    color 0.2s ease,
-    background-color 0.2s ease;
 }
 
-.nn-ai-coach-side-toggle:hover {
-  border-color: var(--main-color-border);
-  color: var(--main-color-strong);
-  background: linear-gradient(
-    180deg,
-    rgba(40, 40, 40, 0.97),
-    rgba(20, 20, 20, 0.98)
-  );
+.nn-ai-coach-side-toggle.sidebar-toggle-button {
+  position: absolute;
+  top: 50%;
+  left: auto;
+  right: 8px;
+  transform: translateY(-50%);
+  margin: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  padding: 0;
+  font-size: 0;
+  pointer-events: auto;
+  transition:
+    right 0.22s ease,
+    transform 0.22s ease;
+}
+
+.nn-ai-coach-dock-open .nn-ai-coach-side-toggle.sidebar-toggle-button {
+  right: var(--nn-ai-panel-width);
+  transform: translate(50%, -50%);
 }
 
 .nn-ai-coach-side-icon {
-  font-size: 17px;
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
   line-height: 1;
-}
-
-.nn-ai-coach-side-text {
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  font-weight: 700;
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
 }
 
 .nn-ai-coach {
   position: absolute;
   top: 0;
-  right: var(--nn-ai-handle-width);
+  right: 0;
   bottom: 0;
   width: var(--nn-ai-panel-width);
   display: flex;
   flex-direction: column;
   min-height: 0;
   border: 1px solid var(--panel-border);
-  border-right: none;
   border-radius: 10px;
   background: linear-gradient(
     165deg,
@@ -2070,9 +2050,10 @@ button {
 }
 
 .nn-ai-coach-dock-closed .nn-ai-coach {
-  transform: translateX(calc(100% + 12px));
-  opacity: 0.92;
+  transform: translateX(calc(100% + 26px));
+  opacity: 0;
   pointer-events: none;
+  box-shadow: none;
 }
 
 .nn-ai-coach-dock-open .nn-ai-coach {
@@ -2157,11 +2138,62 @@ button {
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.5);
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nn-ai-stt-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.84);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.nn-ai-stt-whisper {
+  border-color: rgba(93, 188, 117, 0.5);
+  color: rgba(190, 255, 208, 0.95);
+  background: rgba(59, 107, 72, 0.35);
+}
+
+.nn-ai-stt-browser {
+  border-color: rgba(255, 180, 41, 0.5);
+  color: rgba(255, 232, 194, 0.95);
+  background: rgba(97, 70, 21, 0.35);
+}
+
+.nn-ai-stt-probing {
+  border-color: rgba(170, 170, 170, 0.4);
+  color: rgba(224, 224, 224, 0.92);
+}
+
+.nn-ai-stt-unavailable {
+  border-color: rgba(255, 121, 121, 0.45);
+  color: rgba(255, 195, 195, 0.95);
+  background: rgba(126, 34, 34, 0.28);
+}
+
+.nn-ai-stt-note {
+  margin: 6px 12px 0;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 10.5px;
+  line-height: 1.35;
 }
 
 .nn-ai-chat-list {
   display: grid;
-  gap: 8px;
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 7px;
   margin: 10px 12px 6px;
   padding-bottom: 8px;
   overflow-y: auto;
@@ -2173,28 +2205,47 @@ button {
 }
 
 .nn-ai-chat-bubble {
-  padding: 8px 10px;
+  padding: 7px 9px;
   border-radius: 8px;
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 11px;
+  line-height: 1.35;
   display: grid;
-  gap: 8px;
+  gap: 5px;
+  max-width: 92%;
+  align-self: start;
 }
 
 .nn-ai-chat-content {
-  white-space: pre-wrap;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.nn-ai-chat-meta {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.62);
+  line-height: 1.1;
 }
 
 .nn-ai-chat-user {
   border: 1px solid rgba(255, 180, 41, 0.35);
   background: rgba(255, 180, 41, 0.1);
   color: rgba(255, 242, 218, 0.95);
+  justify-self: end;
 }
 
 .nn-ai-chat-assistant {
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(0, 0, 0, 0.22);
   color: rgba(255, 255, 255, 0.9);
+  justify-self: start;
+}
+
+.nn-ai-chat-status {
+  border-color: rgba(255, 121, 121, 0.4);
+  background: rgba(120, 23, 23, 0.22);
+  color: rgba(255, 208, 208, 0.96);
 }
 
 .nn-ai-chat-speak {
@@ -2321,7 +2372,6 @@ button {
 @media (max-width: 1080px) {
   .nn-ai-coach-dock {
     --nn-ai-panel-width: min(84vw, 340px);
-    --nn-ai-handle-width: 40px;
     top: 14px;
     bottom: 14px;
   }
@@ -2330,11 +2380,6 @@ button {
 @media (max-width: 760px) {
   .nn-ai-coach-dock {
     --nn-ai-panel-width: min(90vw, 320px);
-    --nn-ai-handle-width: 36px;
-  }
-
-  .nn-ai-coach-side-toggle {
-    height: 120px;
   }
 
   .nn-ai-coach-actions {

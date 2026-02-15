@@ -2,6 +2,7 @@ import type { MutableRefObject } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { VLMArchitectureViewport } from './VLMArchitectureViewport'
 import { getVlmArchitecture, type VLMArchitectureSpec } from './architecture'
+import { NnAiCoachPanel } from '../ui/tabs/NnAiCoachPanel'
 import './vlm.css'
 
 export interface VLMTrainingConfig {
@@ -694,9 +695,17 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
   )
 
   const activeTabIndex = activeTab === 'build' ? 0 : activeTab === 'train' ? 1 : 2
+  const coachTab = activeTab === 'build' ? 'validate' : activeTab === 'train' ? 'train' : 'infer'
   const activityPulse = status === 'running'
     ? 1
     : (liveInferenceRunning ? 0.5 : (detections.length > 0 ? 0.28 : 0.08))
+  const inferenceTopPrediction = useMemo(() => {
+    if (detections.length === 0) return null
+    return detections.reduce(
+      (best, detection) => (detection.score > best.score ? detection : best),
+      detections[0]
+    ).label_id
+  }, [detections])
 
   return (
     <div className={`app-shell ${isSidebarCollapsed ? 'app-shell-collapsed' : ''}`}>
@@ -1097,6 +1106,21 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
           onSelectStage={setSelectedStageId}
           lowDetailMode={isLowDetailMode}
           activityPulse={activityPulse}
+        />
+        <NnAiCoachPanel
+          tab={coachTab}
+          layerCount={architecture.stages.length}
+          neuronCount={architecture.blueprint.transformer.hidden_size}
+          weightCount={architecture.blueprint.transformer.token_count}
+          activation={architecture.family}
+          currentEpoch={currentEpoch}
+          totalEpochs={config.epochs}
+          trainLoss={latestLoss}
+          testLoss={null}
+          trainAccuracy={null}
+          testAccuracy={null}
+          trainingStatus={status}
+          inferenceTopPrediction={inferenceTopPrediction}
         />
 
         <button

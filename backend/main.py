@@ -25,7 +25,7 @@ from routers.vlm_websocket import router as vlm_websocket_router
 from routers.websocket import router as websocket_router
 from routers.ml_model import router as ml_model_router
 from routers.ml_websocket import router as ml_ws_router
-from routers.ai_coach import router as ai_coach_router
+from routers.ai_coach import router as ai_coach_router, warn_if_ai_provider_keys_missing
 
 logger = logging.getLogger(__name__)
 if not logging.getLogger().handlers:
@@ -39,6 +39,7 @@ if not logging.getLogger().handlers:
 async def lifespan(_: FastAPI):
     artifacts_dir = Path(__file__).resolve().parent / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
+    warn_if_ai_provider_keys_missing()
     compute_node_url = os.getenv("VLM_COMPUTE_NODE_URL", "").strip()
     if compute_node_url:
         logger.info("VLM compute node configured at %s", compute_node_url)

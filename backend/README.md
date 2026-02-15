@@ -135,6 +135,7 @@ Behavior:
 - `GET /api/datasets`
 - `POST /api/ai/nn-coach`
 - `POST /api/ai/recommend`
+- `GET /api/ai/capabilities`
 - `POST /api/ai/stt/whisper` (WAV upload)
 - `POST /api/ai/tts/chatterbox` (returns WAV audio)
 - `WS /ws/training/{job_id}`
@@ -142,6 +143,7 @@ Behavior:
 Speech model notes:
 - Whisper STT uses `WHISPER_MODEL` (default `openai/whisper-small`) and expects uncompressed WAV input.
 - Chatterbox TTS endpoint is wired in the API; install `chatterbox-tts` in your runtime environment to enable synthesis.
+- Chat provider key lookup supports `OPENAI_API_KEY` and legacy alias `PENAI_API_KEY`.
 
 ### Random Forest API
 

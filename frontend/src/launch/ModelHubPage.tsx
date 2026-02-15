@@ -328,6 +328,7 @@ export default function ModelHubPage() {
   const [recAnswer, setRecAnswer] = useState('')
   const [recLoading, setRecLoading] = useState(false)
   const [recSource, setRecSource] = useState('')
+  const [recModel, setRecModel] = useState('')
 
   const openSettings = () => {
     setDraftProvider(aiProvider)
@@ -358,6 +359,7 @@ export default function ModelHubPage() {
     setRecLoading(true)
     setRecAnswer('')
     setRecSource('')
+    setRecModel('')
     try {
       const res = await fetch('/api/ai/recommend', {
         method: 'POST',
@@ -369,12 +371,18 @@ export default function ModelHubPage() {
         }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = (await res.json()) as { recommendation?: string; source?: string }
+      const data = (await res.json()) as {
+        recommendation?: string
+        source?: string
+        model?: string | null
+      }
       setRecAnswer(data.recommendation || 'No recommendation received.')
       setRecSource(data.source || '')
+      setRecModel((data.model ?? '').trim())
     } catch {
       setRecAnswer('Failed to get recommendation. Make sure the backend is running.')
       setRecSource('error')
+      setRecModel('')
     } finally {
       setRecLoading(false)
     }
@@ -397,13 +405,13 @@ export default function ModelHubPage() {
           classifier or a business designing an end-to-end demand forecasting engine, Burn is there
           to help.
         </p>
-        <p className="hub-subtitle">
+        {/* <p className="hub-subtitle">
           New: the Digits NN preset uses the built-in sklearn dataset and works without Kaggle setup.
         </p>
         <p className="hub-subtitle">
           VLM projects use Hugging Face object-detection models (default: YOLOS-Tiny) and include a
           camera testing interface.
-        </p>
+        </p> */}
         <p className="hub-subtitle">
           Need to manage live model endpoints later? Open{' '}
           <a href="/deployments" className="hub-inline-link">
@@ -606,7 +614,7 @@ export default function ModelHubPage() {
                 <div className="hub-recommend-answer-text">{recAnswer}</div>
                 {recSource && recSource !== 'error' && recSource !== 'unavailable' && (
                   <div className="hub-recommend-answer-source">
-                    Powered by {recSource.toUpperCase()} · {aiModel}
+                    Powered by {recSource.toUpperCase()}{recModel ? ` · ${recModel}` : ''}
                   </div>
                 )}
               </div>

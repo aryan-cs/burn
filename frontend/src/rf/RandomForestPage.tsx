@@ -10,6 +10,7 @@ import { useRfWebSocket } from './hooks/useRfWebSocket'
 import { datasetDefaults, useRFGraphStore } from './store/rfGraphStore'
 import { useRFRunStore } from './store/rfRunStore'
 import { serializeRFGraph } from './utils/rfSerializer'
+import { NnAiCoachPanel } from '../ui/tabs/NnAiCoachPanel'
 import type {
   RFCompileResponse,
   RFDatasetMeta,
@@ -158,6 +159,13 @@ export default function RandomForestPage() {
     [builtTrees, totalTrees]
   )
   const activeTabIndex = activeTab === 'build' ? 0 : activeTab === 'train' ? 1 : 2
+  const coachTab = activeTab === 'build' ? 'validate' : activeTab === 'train' ? 'train' : 'infer'
+  const latestTrainAccuracy = finalResult?.final_train_accuracy ?? latestProgress?.train_accuracy ?? null
+  const latestTestAccuracy = finalResult?.final_test_accuracy ?? latestProgress?.test_accuracy ?? null
+  const inferenceTopPrediction = useMemo(() => {
+    const prediction = inferenceData?.prediction_indices?.[0]
+    return typeof prediction === 'number' ? prediction : null
+  }, [inferenceData?.prediction_indices])
 
   useEffect(() => {
     setInferenceValues((current) => {
@@ -598,6 +606,21 @@ export default function RandomForestPage() {
         <div className="rf-builder-layer">
           <RfGraphView lowDetailMode={isLowDetailMode} />
         </div>
+        <NnAiCoachPanel
+          tab={coachTab}
+          layerCount={nodes.length}
+          neuronCount={featureCount}
+          weightCount={totalTrees}
+          activation={training.ensembleStrategy}
+          currentEpoch={builtTrees}
+          totalEpochs={totalTrees}
+          trainLoss={latestTrainAccuracy === null ? null : 1 - latestTrainAccuracy}
+          testLoss={latestTestAccuracy === null ? null : 1 - latestTestAccuracy}
+          trainAccuracy={latestTrainAccuracy}
+          testAccuracy={latestTestAccuracy}
+          trainingStatus={status}
+          inferenceTopPrediction={inferenceTopPrediction}
+        />
       </section>
     </div>
   )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import os
 import wave
 from threading import Lock
@@ -15,8 +16,11 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/ai", tags=["ai-coach"])
+logger = logging.getLogger(__name__)
 
 Provider = Literal["openai", "gemini", "anthropic", "nvidia"]
+Source = Literal["openai", "gemini", "anthropic", "nvidia", "unavailable", "error"]
+PROVIDER_FALLBACK_ORDER: tuple[Provider, ...] = ("nvidia", "gemini", "anthropic", "openai")
 
 
 class ChatMessage(BaseModel):
@@ -47,7 +51,9 @@ class NnCoachRequest(BaseModel):
 class NnCoachResponse(BaseModel):
     tips: list[str]
     answer: str
-    source: Literal["openai", "gemini", "anthropic", "nvidia", "unavailable", "error"]
+    source: Source
+    model: str | None = None
+    reason: str | None = None
 
 
 class RecommendRequest(BaseModel):
@@ -58,7 +64,39 @@ class RecommendRequest(BaseModel):
 
 class RecommendResponse(BaseModel):
     recommendation: str
-    source: Literal["openai", "gemini", "anthropic", "nvidia", "unavailable", "error"]
+    source: Source
+    model: str | None = None
+    reason: str | None = None
+
+
+class ChatCapabilities(BaseModel):
+    availableProviders: list[Provider]
+    defaultProvider: Provider
+
+
+class WhisperCapabilities(BaseModel):
+    available: bool
+    model: str | None = None
+    reason: str | None = None
+
+
+class SttCapabilities(BaseModel):
+    whisper: WhisperCapabilities
+
+
+class ChatterboxCapabilities(BaseModel):
+    available: bool
+    reason: str | None = None
+
+
+class TtsCapabilities(BaseModel):
+    chatterbox: ChatterboxCapabilities
+
+
+class AiCapabilitiesResponse(BaseModel):
+    chat: ChatCapabilities
+    stt: SttCapabilities
+    tts: TtsCapabilities
 
 
 class WhisperSttResponse(BaseModel):
@@ -184,13 +222,173 @@ whisper_transcriber = WhisperTranscriber()
 chatterbox_synthesizer = ChatterboxSynthesizer()
 
 
+def _provider_has_key(provider: Provider) -> bool:
+    if provider == "openai":
+        return len(_collect_openai_keys()) > 0
+    if provider == "nvidia":
+        return len(os.getenv("NVIDIA_API_KEY", "").strip()) > 0
+    if provider == "gemini":
+        return len(os.getenv("GEMINI_API_KEY", "").strip()) > 0
+    return len(os.getenv("ANTHROPIC_API_KEY", "").strip() or os.getenv("ANTROPHIC_API_KEY", "").strip()) > 0
+
+
+def get_available_chat_providers() -> list[Provider]:
+    return [provider for provider in PROVIDER_FALLBACK_ORDER if _provider_has_key(provider)]
+
+
+def warn_if_ai_provider_keys_missing() -> None:
+    if get_available_chat_providers():
+        return
+    logger.warning(
+        "No AI provider keys configured. Set one of NVIDIA_API_KEY, GEMINI_API_KEY, "
+        "ANTHROPIC_API_KEY, OPENAI_API_KEY (or PENAI_API_KEY alias)."
+    )
+
+
+def _build_provider_attempt_order(selected_provider: str) -> list[Provider]:
+    normalized = selected_provider.strip().lower()
+    attempts: list[Provider] = []
+    if normalized in {"openai", "gemini", "anthropic", "nvidia"}:
+        attempts.append(normalized)  # type: ignore[arg-type]
+    for provider in PROVIDER_FALLBACK_ORDER:
+        if provider not in attempts:
+            attempts.append(provider)
+    return attempts
+
+
+async def _call_provider(
+    client: httpx.AsyncClient,
+    provider: Provider,
+    history: list[dict[str, str]],
+    model: str,
+    system_prompt: str,
+) -> str:
+    if provider == "openai":
+        return await _call_openai(client, history, model)
+    if provider == "nvidia":
+        return await _call_nvidia(client, history, model)
+    if provider == "gemini":
+        return await _call_gemini(client, history, model, system_prompt)
+    return await _call_anthropic(client, history, model, system_prompt)
+
+
+async def _run_provider_failover(
+    *,
+    selected_provider: str,
+    selected_model: str | None,
+    history: list[dict[str, str]],
+    system_prompt: str,
+) -> tuple[str, Source, str | None, str | None]:
+    attempts = _build_provider_attempt_order(selected_provider)
+    normalized_selected = selected_provider.strip().lower()
+    selected_model_clean = (selected_model or "").strip() or None
+
+    unavailable: list[str] = []
+    errors: list[str] = []
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        for provider in attempts:
+            model = selected_model_clean if provider == normalized_selected and selected_model_clean else _default_model(provider)
+            try:
+                answer = (await _call_provider(client, provider, history, model, system_prompt)).strip()
+            except MissingProviderKey:
+                unavailable.append(provider)
+                continue
+            except Exception as exc:
+                errors.append(f"{provider}: {type(exc).__name__}")
+                continue
+
+            if answer:
+                reason = None
+                if provider != normalized_selected and normalized_selected in {"openai", "gemini", "anthropic", "nvidia"}:
+                    reason = f"Primary provider '{normalized_selected}' was unavailable; used '{provider}' fallback."
+                return answer, provider, reason, model  # type: ignore[return-value]
+
+            errors.append(f"{provider}: empty response")
+
+    if unavailable and not errors:
+        return (
+            "",
+            "unavailable",
+            f"No usable provider keys configured for attempted providers: {', '.join(unavailable)}.",
+            None,
+        )
+    if unavailable and errors:
+        return (
+            "",
+            "error",
+            f"Unavailable providers: {', '.join(unavailable)}. Failed providers: {'; '.join(errors)}.",
+            None,
+        )
+    if errors:
+        return "", "error", f"All provider attempts failed: {'; '.join(errors)}.", None
+
+    return "", "error", "No provider attempts were executed.", None
+
+
+def _whisper_capability() -> tuple[bool, str | None]:
+    try:
+        import transformers  # noqa: F401
+    except Exception:
+        return False, "Whisper requires transformers in backend environment."
+    try:
+        import torch  # noqa: F401
+    except Exception:
+        return False, "Whisper requires torch in backend environment."
+    return True, None
+
+
+def _chatterbox_capability() -> tuple[bool, str | None]:
+    try:
+        from chatterbox import tts as _tts  # noqa: F401
+    except Exception:
+        return False, "Chatterbox package is not installed in backend environment."
+    return True, None
+
+
+@router.get("/capabilities", response_model=AiCapabilitiesResponse)
+async def ai_capabilities() -> AiCapabilitiesResponse:
+    available_providers = get_available_chat_providers()
+    configured_default = os.getenv("AI_PROVIDER", "nvidia").strip().lower()
+    if configured_default in {"openai", "gemini", "anthropic", "nvidia"}:
+        default_provider: Provider = configured_default  # type: ignore[assignment]
+    else:
+        default_provider = "nvidia"
+
+    if default_provider not in available_providers and available_providers:
+        default_provider = available_providers[0]
+
+    whisper_available, whisper_reason = _whisper_capability()
+    chatterbox_available, chatterbox_reason = _chatterbox_capability()
+
+    return AiCapabilitiesResponse(
+        chat=ChatCapabilities(
+            availableProviders=available_providers,
+            defaultProvider=default_provider,
+        ),
+        stt=SttCapabilities(
+            whisper=WhisperCapabilities(
+                available=whisper_available,
+                model=whisper_transcriber.model_name if whisper_available else None,
+                reason=whisper_reason,
+            )
+        ),
+        tts=TtsCapabilities(
+            chatterbox=ChatterboxCapabilities(
+                available=chatterbox_available,
+                reason=chatterbox_reason,
+            )
+        ),
+    )
+
+
 @router.post("/recommend", response_model=RecommendResponse)
 async def recommend_algorithm(payload: RecommendRequest) -> RecommendResponse:
     provider = (payload.provider or "nvidia").strip().lower()
     model = (payload.model or _default_model(provider)).strip()
 
     if provider not in {"openai", "gemini", "anthropic", "nvidia"}:
-        return RecommendResponse(recommendation="", source="error")
+        provider = "nvidia"
 
     system_prompt = (
         "You are Burn, an expert machine learning advisor. "
@@ -215,25 +413,13 @@ async def recommend_algorithm(payload: RecommendRequest) -> RecommendResponse:
         {"role": "user", "content": payload.description},
     ]
 
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            if provider == "openai":
-                answer = await _call_openai(client, history, model)
-            elif provider == "nvidia":
-                answer = await _call_nvidia(client, history, model)
-            elif provider == "gemini":
-                answer = await _call_gemini(client, history, model, system_prompt)
-            else:
-                answer = await _call_anthropic(client, history, model, system_prompt)
-
-        if not answer:
-            return RecommendResponse(recommendation="", source="error")
-
-        return RecommendResponse(recommendation=answer, source=provider)  # type: ignore[arg-type]
-    except MissingProviderKey:
-        return RecommendResponse(recommendation="", source="unavailable")
-    except Exception:
-        return RecommendResponse(recommendation="", source="error")
+    answer, source, reason, used_model = await _run_provider_failover(
+        selected_provider=provider,
+        selected_model=model,
+        history=history,
+        system_prompt=system_prompt,
+    )
+    return RecommendResponse(recommendation=answer, source=source, model=used_model, reason=reason)
 
 
 @router.post("/stt/whisper", response_model=WhisperSttResponse)
@@ -299,7 +485,10 @@ async def nn_coach(payload: NnCoachRequest) -> NnCoachResponse:
     model = (payload.model or _default_model(provider)).strip()
 
     if provider not in {"openai", "gemini", "anthropic", "nvidia"}:
-        return NnCoachResponse(tips=[], answer="", source="error")
+        provider = os.getenv("AI_PROVIDER", "nvidia").strip().lower()
+        if provider not in {"openai", "gemini", "anthropic", "nvidia"}:
+            provider = "nvidia"
+        model = _default_model(provider)
 
     system_prompt = (
         "You are a practical neural-network training coach. "
@@ -338,26 +527,19 @@ async def nn_coach(payload: NnCoachRequest) -> NnCoachResponse:
 
     history.append({"role": "user", "content": final_user_prompt})
 
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            if provider == "openai":
-                answer = await _call_openai(client, history, model)
-            elif provider == "nvidia":
-                answer = await _call_nvidia(client, history, model)
-            elif provider == "gemini":
-                answer = await _call_gemini(client, history, model, system_prompt)
-            else:
-                answer = await _call_anthropic(client, history, model, system_prompt)
-
-        if not answer:
-            return NnCoachResponse(tips=[], answer="", source="error")
-
-        tips = _extract_tips(answer)
-        return NnCoachResponse(tips=tips, answer=answer, source=provider)  # type: ignore[arg-type]
-    except MissingProviderKey:
-        return NnCoachResponse(tips=[], answer="", source="unavailable")
-    except Exception:
-        return NnCoachResponse(tips=[], answer="", source="error")
+    answer, source, reason, used_model = await _run_provider_failover(
+        selected_provider=provider,
+        selected_model=model,
+        history=history,
+        system_prompt=system_prompt,
+    )
+    return NnCoachResponse(
+        tips=_extract_tips(answer) if answer else [],
+        answer=answer,
+        source=source,
+        model=used_model,
+        reason=reason,
+    )
 
 
 def _decode_wav_audio(audio_bytes: bytes) -> tuple[np.ndarray, int]:
@@ -465,6 +647,10 @@ def _collect_openai_keys() -> list[str]:
     single_key = os.getenv("OPENAI_API_KEY", "").strip()
     if single_key:
         keys.append(single_key)
+
+    legacy_key = os.getenv("PENAI_API_KEY", "").strip()
+    if legacy_key:
+        keys.append(legacy_key)
 
     multi_raw = os.getenv("OPENAI_API_KEYS", "")
     if multi_raw:

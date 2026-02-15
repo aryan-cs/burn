@@ -45,9 +45,11 @@ def test_websocket_streams_epoch_and_done(monkeypatch, client) -> None:
     time.sleep(0.05)
 
     with client.websocket_connect(f"/ws/training/{job_id}") as ws:
+        hello = ws.receive_json()
         msg1 = ws.receive_json()
         msg2 = ws.receive_json()
 
+    assert hello["type"] == "ws_connected"
     assert msg1["type"] == "epoch_update"
     assert msg2["type"] == "training_done"
 
@@ -67,7 +69,9 @@ def test_websocket_streams_error(monkeypatch, client) -> None:
     time.sleep(0.05)
 
     with client.websocket_connect(f"/ws/training/{job_id}") as ws:
+        hello = ws.receive_json()
         msg = ws.receive_json()
 
+    assert hello["type"] == "ws_connected"
     assert msg["type"] == "error"
     assert msg["message"] == "boom"

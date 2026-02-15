@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -262,7 +263,13 @@ async def train_model(graph: GraphSpec):
     task = asyncio.create_task(run_training_job(entry.job_id, compiled, training, ARTIFACTS_DIR))
     job_registry.set_task(entry.job_id, task)
 
-    return {"job_id": entry.job_id, "status": entry.status}
+    return {
+        "job_id": entry.job_id,
+        "status": entry.status,
+        "training_backend": os.getenv("TRAINING_BACKEND", "modal").strip().lower(),
+        "modal_app_name": os.getenv("MODAL_APP_NAME", "burn-training"),
+        "modal_function_name": os.getenv("MODAL_FUNCTION_NAME", "train_job_remote"),
+    }
 
 
 @router.post("/stop")

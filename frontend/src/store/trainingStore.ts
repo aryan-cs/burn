@@ -84,10 +84,19 @@ export const useTrainingStore = create<TrainingState>((set) => ({
     }),
 
   addMetric: (metric) =>
-    set((s) => ({
-      metrics: [...s.metrics, metric],
-      currentEpoch: metric.epoch,
-    })),
+    set((s) => {
+      const nextMetrics = [...s.metrics]
+      const existingIdx = nextMetrics.findIndex((entry) => entry.epoch === metric.epoch)
+      if (existingIdx >= 0) {
+        nextMetrics[existingIdx] = metric
+      } else {
+        nextMetrics.push(metric)
+      }
+      return {
+        metrics: nextMetrics,
+        currentEpoch: metric.epoch,
+      }
+    }),
 
   updateWeights: (snapshot) =>
     set({ latestWeights: snapshot }),

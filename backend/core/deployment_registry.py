@@ -51,15 +51,16 @@ class DeploymentRegistry:
         model: Any,
         input_shape: list[int] | None,
         num_classes: int | None,
+        endpoint_path: str | None = None,
     ) -> DeploymentEntry:
         deployment_id = uuid4().hex
-        endpoint_path = f"/api/deploy/{deployment_id}/infer"
+        resolved_endpoint_path = endpoint_path or f"/api/deploy/{deployment_id}/infer"
         entry = DeploymentEntry(
             deployment_id=deployment_id,
             job_id=job_id,
             status="running",
             target=target,
-            endpoint_path=endpoint_path,
+            endpoint_path=resolved_endpoint_path,
             created_at=datetime.now(timezone.utc),
             name=name,
             model=model,
@@ -73,7 +74,7 @@ class DeploymentRegistry:
             level="info",
             event="deployment_created",
             message="Deployment created and running.",
-            details={"job_id": job_id, "target": target, "endpoint_path": endpoint_path},
+            details={"job_id": job_id, "target": target, "endpoint_path": resolved_endpoint_path},
             persist=False,
         )
         self._persist()

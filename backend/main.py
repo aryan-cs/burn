@@ -28,6 +28,11 @@ from routers.ml_websocket import router as ml_ws_router
 from routers.ai_coach import router as ai_coach_router
 
 logger = logging.getLogger(__name__)
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    )
 
 
 @asynccontextmanager

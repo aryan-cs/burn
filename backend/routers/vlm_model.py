@@ -314,9 +314,12 @@ async def vlm_infer(payload: VLMInferRequest) -> dict[str, Any]:
                 "job_id_used": resolved_job_id,
                 "runtime_backend": f"remote:{remote_backend}",
                 "runtime_model_id": remote_model_id,
+                "runtime_device": remote_device,
                 "image_width": int(remote_response.get("image_width", 0)),
                 "image_height": int(remote_response.get("image_height", 0)),
                 "detections": remote_response.get("detections", []),
+                "findings_summary": remote_response.get("findings_summary"),
+                "findings": remote_response.get("findings", []),
                 "warning": remote_response.get("warning"),
             }
         except ComputeNodeError as exc:
@@ -355,8 +358,11 @@ async def vlm_infer(payload: VLMInferRequest) -> dict[str, Any]:
         "job_id_used": resolved_job_id,
         "runtime_backend": runtime.backend,
         "runtime_model_id": runtime.model_id,
+        "runtime_device": str(vlm_runtime.device),
         "image_width": detection["image_width"],
         "image_height": detection["image_height"],
         "detections": detection["detections"],
+        "findings_summary": None,
+        "findings": [],
         "warning": warning,
     }

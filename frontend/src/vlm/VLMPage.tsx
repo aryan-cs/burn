@@ -39,13 +39,22 @@ interface VLMDetection {
   box: [number, number, number, number]
 }
 
+interface VLMFinding {
+  label: string
+  confidence: number
+  bbox: [number, number, number, number] | null
+}
+
 interface VLMInferResponse {
   job_id_used?: string | null
   runtime_backend: string
   runtime_model_id: string
+  runtime_device?: string
   image_width: number
   image_height: number
   detections: VLMDetection[]
+  findings_summary?: string | null
+  findings?: VLMFinding[]
   warning?: string | null
 }
 
@@ -178,6 +187,8 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
   const [liveModeEnabled, setLiveModeEnabled] = useState(true)
   const [liveInferenceRunning, setLiveInferenceRunning] = useState(false)
   const [detections, setDetections] = useState<VLMDetection[]>([])
+  const [findingsSummary, setFindingsSummary] = useState<string | null>(null)
+  const [findings, setFindings] = useState<VLMFinding[]>([])
   const [scoreThreshold, setScoreThreshold] = useState(0.45)
   const [lastImageSize, setLastImageSize] = useState<[number, number] | null>(null)
 
@@ -448,17 +459,23 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
       liveUiTickRef.current += 1
       if (shouldSyncUi) {
         setDetections(response.detections)
+        setFindingsSummary(response.findings_summary ?? null)
+        setFindings(response.findings ?? [])
         setLastImageSize([response.image_width, response.image_height])
         setRuntimeWarning(response.warning ?? null)
       }
 
       if (!silent) {
         const runtimeLabel = `${response.runtime_backend} · ${response.runtime_model_id}`
-        setMessage(
-          response.detections.length > 0
-            ? `Detected ${response.detections.length} object(s) using ${runtimeLabel}.`
-            : `No objects detected above threshold (${runtimeLabel}).`
-        )
+        const runtimeDevice = response.runtime_device ? ` on ${response.runtime_device}` : ''
+        const findingsCount = response.findings?.length ?? 0
+        if (response.detections.length > 0) {
+          setMessage(`Detected ${response.detections.length} object(s) using ${runtimeLabel}${runtimeDevice}.`)
+        } else if (findingsCount > 0) {
+          setMessage(`No boxes returned, but received ${findingsCount} finding(s) from ${runtimeLabel}${runtimeDevice}.`)
+        } else {
+          setMessage(`No objects detected above threshold (${runtimeLabel}${runtimeDevice}).`)
+        }
       }
     },
     [cameraReady, jobId, scoreThreshold]
@@ -622,6 +639,8 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
       }
     }
     setDetections([])
+    setFindingsSummary(null)
+    setFindings([])
     setLastImageSize(null)
     setMessage('Cleared last detection result.')
   }, [])
@@ -980,6 +999,19 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
                     ))
                   )}
                 </div>
+                {findingsSummary || findings.length > 0 ? (
+                  <div className="vlm-detection-list">
+                    <p>{findingsSummary ?? 'Model findings'}</p>
+                    {findings.length > 0 ? (
+                      findings.slice(0, 10).map((finding, index) => (
+                        <div key={`${finding.label}-${index}`} className="vlm-detection-item">
+                          <span>{finding.label}</span>
+                          <span>{(finding.confidence * 100).toFixed(1)}%</span>
+                        </div>
+                      ))
+                    ) : null}
+                  </div>
+                ) : null}
               </section>
             </div>
           ) : null}

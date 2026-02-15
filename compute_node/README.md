@@ -53,3 +53,23 @@ COMPUTE_NODE_USE_FP16_MODEL=0
 Current acceleration settings are visible at:
 
 - `GET /health` (returns `device`, `autocast`, `fp16_model`)
+
+## Cosmos engine mode
+
+Switch compute node to Cosmos-compatible vision chat inference:
+
+```bash
+VLM_ENGINE=cosmos
+NVIDIA_API_KEY=nvapi-...
+# Optional overrides:
+# COSMOS_API_KEY=...
+# COSMOS_BASE_URL=https://integrate.api.nvidia.com/v1
+# COSMOS_MODEL=nvidia/cosmos-nemotron-34b
+# COSMOS_TIMEOUT_SECONDS=45
+```
+
+In Cosmos mode, the node asks for structured findings JSON and maps returned findings into:
+
+- `findings_summary`
+- `findings[]`
+- `detections[]` (only when Cosmos returns bounding boxes)

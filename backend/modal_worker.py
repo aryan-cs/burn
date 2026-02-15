@@ -23,6 +23,8 @@ PROGRESS_DICT_NAME = "burn-training-progress"
 progress_store = modal.Dict.from_name(PROGRESS_DICT_NAME, create_if_missing=True)
 DEPLOYMENT_DICT_NAME = "burn-modal-deployments"
 deployment_store = modal.Dict.from_name(DEPLOYMENT_DICT_NAME, create_if_missing=True)
+SANDBOX_DEPLOYMENT_DICT_NAME = "burn-modal-sandbox-deployments"
+sandbox_deployment_store = modal.Dict.from_name(SANDBOX_DEPLOYMENT_DICT_NAME, create_if_missing=True)
 image = modal.Image.debian_slim().pip_install(
     "fastapi[standard]>=0.115.0",
     "kaggle>=2.0.0",
@@ -126,8 +128,8 @@ def _to_inference_tensor(raw_inputs: Any, expected_shape: list[int] | None) -> t
     )
 
 
-def _load_deployed_model(deployment_id: str):
-    payload = deployment_store.get(deployment_id)
+def _load_deployed_model_from_store(deployment_id: str, store: modal.Dict):
+    payload = store.get(deployment_id)
     if not isinstance(payload, dict):
         raise ValueError(f"Unknown modal deployment_id: {deployment_id}")
 
@@ -405,15 +407,13 @@ def unregister_deployment_remote(deployment_id: str) -> dict[str, Any]:
     return {"deployment_id": deployment_id, "status": "deleted"}
 
 
-@app.function(image=image, timeout=60)
-@modal.fastapi_endpoint(method="POST")
-def infer_deployment_remote(payload: dict[str, Any]) -> dict[str, Any]:
+def _infer_deployment_payload(payload: dict[str, Any], store: modal.Dict) -> dict[str, Any]:
     deployment_id = str(payload.get("deployment_id", "")).strip()
     if not deployment_id:
         raise ValueError("deployment_id is required")
     raw_inputs = payload.get("inputs")
     return_probabilities = bool(payload.get("return_probabilities", True))
-    model, input_shape = _load_deployed_model(deployment_id)
+    model, input_shape = _load_deployed_model_from_store(deployment_id, store)
     input_tensor = _to_inference_tensor(raw_inputs, input_shape)
     with torch.no_grad():
         output = model(input_tensor)
@@ -431,3 +431,43 @@ def infer_deployment_remote(payload: dict[str, Any]) -> dict[str, Any]:
         if return_probabilities:
             response["probabilities"] = torch.softmax(logits, dim=1).tolist()
     return response
+
+
+@app.function(image=image, timeout=60)
+@modal.fastapi_endpoint(method="POST")
+def infer_deployment_remote(payload: dict[str, Any]) -> dict[str, Any]:
+    return _infer_deployment_payload(payload, deployment_store)
+
+
+@app.function(image=image, timeout=60 * 5)
+def register_sandbox_deployment_remote(
+    deployment_id: str,
+    graph_payload: dict[str, Any],
+    training_payload: dict[str, Any],
+    state_dict_b64: str,
+    input_shape: list[int] | None = None,
+) -> dict[str, Any]:
+    if not deployment_id:
+        raise ValueError("deployment_id is required")
+    sandbox_deployment_store[deployment_id] = {
+        "graph_payload": graph_payload,
+        "training_payload": training_payload,
+        "state_dict_b64": state_dict_b64,
+        "input_shape": input_shape,
+    }
+    return {"deployment_id": deployment_id, "status": "ready"}
+
+
+@app.function(image=image, timeout=60)
+def unregister_sandbox_deployment_remote(deployment_id: str) -> dict[str, Any]:
+    try:
+        del sandbox_deployment_store[deployment_id]
+    except KeyError:
+        pass
+    return {"deployment_id": deployment_id, "status": "deleted"}
+
+
+@app.function(image=image, timeout=60)
+@modal.fastapi_endpoint(method="POST")
+def infer_sandbox_deployment_remote(payload: dict[str, Any]) -> dict[str, Any]:
+    return _infer_deployment_payload(payload, sandbox_deployment_store)

@@ -23,7 +23,6 @@ interface BuildTabProps {
   selectedCols: number
 
   // Extra editable fields
-  selectedChannels: number
   selectedUnits: number
   selectedDropoutRate: number
   selectedOutputClasses: number
@@ -35,7 +34,6 @@ interface BuildTabProps {
   sizeFieldLabel: string
 
   canEditActivation: boolean
-  canEditChannels: boolean
   canEditUnits: boolean
   canEditDropoutRate: boolean
   canEditOutputClasses: boolean
@@ -60,7 +58,6 @@ interface BuildTabProps {
   onRowsChange: (value: string) => void
   onColsChange: (value: string) => void
 
-  onChannelsChange: (value: string) => void
   onUnitsChange: (value: string) => void
   onDropoutRateChange: (value: string) => void
   onOutputClassesChange: (value: string) => void
@@ -86,7 +83,6 @@ export function BuildTab({
   selectedDisplayName,
   selectedRows,
   selectedCols,
-  selectedChannels,
   selectedUnits,
   selectedDropoutRate,
   selectedOutputClasses,
@@ -95,7 +91,6 @@ export function BuildTab({
   canEditSize,
   sizeFieldLabel,
   canEditActivation,
-  canEditChannels,
   canEditUnits,
   canEditDropoutRate,
   canEditOutputClasses,
@@ -114,7 +109,6 @@ export function BuildTab({
   onNameCancel,
   onRowsChange,
   onColsChange,
-  onChannelsChange,
   onUnitsChange,
   onDropoutRateChange,
   onOutputClassesChange,
@@ -128,7 +122,7 @@ export function BuildTab({
   validateLabel,
 }: BuildTabProps) {
   return (
-    <div className="tab-panel">
+    <div className="tab-panel build-tab-panel">
       <section className="panel-card panel-card-layers">
         <div className="layer-list-shell">
           <ol className="layer-list">
@@ -269,21 +263,8 @@ export function BuildTab({
             </div>
           </div>
 
-          {canEditChannels || canEditUnits || canEditDropoutRate || canEditOutputClasses ? (
+          {canEditUnits || canEditDropoutRate || canEditOutputClasses ? (
             <div className="layer-editor-extra-grid">
-              {canEditChannels ? (
-                <label className="field-group field-group-inline">
-                  <span className="field-label">Channels</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={selectedChannels}
-                    onChange={(event) => onChannelsChange(event.target.value)}
-                    className="size-input"
-                  />
-                </label>
-              ) : null}
-
               {canEditUnits ? (
                 <label className="field-group field-group-inline">
                   <span className="field-label">Units</span>

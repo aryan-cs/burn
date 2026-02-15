@@ -38,7 +38,7 @@ export function RfViewport({ lowDetailMode }: RfViewportProps) {
             RIGHT: 2,
           }}
           minDistance={3}
-          maxDistance={45}
+          maxDistance={110}
         />
       </Canvas>
     </div>

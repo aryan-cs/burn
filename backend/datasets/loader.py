@@ -33,7 +33,7 @@ CATS_DOGS_TEST_SPLIT = float(os.getenv("CATS_DOGS_TEST_SPLIT", "0.2"))
 CATS_DOGS_MAX_PER_CLASS = int(os.getenv("CATS_DOGS_MAX_PER_CLASS", "1200"))
 CATS_DOGS_RANDOM_SEED = int(os.getenv("CATS_DOGS_RANDOM_SEED", "42"))
 CATS_DOGS_NUM_WORKERS = int(os.getenv("CATS_DOGS_NUM_WORKERS", "0"))
-CATS_DOGS_SAMPLE_LIMIT = int(os.getenv("CATS_DOGS_SAMPLE_LIMIT", "8"))
+CATS_DOGS_SAMPLE_LIMIT = int(os.getenv("CATS_DOGS_SAMPLE_LIMIT", "32"))
 CATS_DOGS_REF_CANDIDATES = (
     os.getenv("CATS_DOGS_KAGGLE_REF", "").strip(),
     "karakaggle/kaggle-cat-vs-dog-dataset",
@@ -389,7 +389,7 @@ def get_cats_vs_dogs_inference_samples(
     if normalized_split not in {"train", "test"}:
         raise RuntimeError("split must be either 'train' or 'test'")
 
-    safe_limit = max(1, min(int(limit), 32))
+    safe_limit = max(1, min(int(limit), 128))
     root_dir, cat_dir_name, dog_dir_name, _ = _ensure_kaggle_cats_vs_dogs()
     cat_paths = _collect_class_images(root_dir, cat_dir_name)
     dog_paths = _collect_class_images(root_dir, dog_dir_name)

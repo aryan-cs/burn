@@ -408,7 +408,7 @@ export function VLMArchitectureViewport({
           enableZoom
           enableRotate
           minDistance={5}
-          maxDistance={32}
+          maxDistance={72}
           target={[0.7, 0.1, 0]}
           mouseButtons={{
             LEFT: THREE.MOUSE.ROTATE,

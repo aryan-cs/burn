@@ -417,7 +417,7 @@ async def export_model(job_id: str, format: Literal["py", "pt"] = "py"):
 async def inference_samples(
     dataset: str,
     split: Literal["train", "test"] = "test",
-    limit: int = Query(default=8, ge=1, le=32),
+    limit: int = Query(default=8, ge=1, le=128),
 ):
     normalized_dataset = dataset.strip().lower()
     if normalized_dataset != "cats_vs_dogs":

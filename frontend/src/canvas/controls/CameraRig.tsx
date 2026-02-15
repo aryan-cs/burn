@@ -20,7 +20,7 @@ export function CameraRig() {
         RIGHT: THREE.MOUSE.PAN,
       }}
       minDistance={3}
-      maxDistance={50}
+      maxDistance={120}
     />
   )
 }

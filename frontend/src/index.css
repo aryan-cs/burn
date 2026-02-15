@@ -218,31 +218,13 @@ button {
   top: 18px;
   right: 18px;
   z-index: 6;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 42px;
-  height: 42px;
-  border: 1px solid #3a3a3a;
-  border-radius: 8px;
-  background: rgba(20, 20, 20, 0.92);
-  color: #ffffff;
   text-decoration: none;
-  box-shadow: 0 0 16px rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(4px);
-  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
-.builder-home-button:hover {
-  background: rgba(45, 45, 45, 0.95);
-  border-color: #4a4a4a;
-}
-
+.builder-home-button,
 .align-button,
-.detail-mode-button {
-  position: absolute;
-  right: 18px;
-  z-index: 4;
+.detail-mode-button,
+.nn-ai-coach-toggle {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -258,6 +240,13 @@ button {
   transition: background-color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
 }
 
+.align-button,
+.detail-mode-button {
+  position: absolute;
+  right: 18px;
+  z-index: 4;
+}
+
 .align-button {
   bottom: 18px;
 }
@@ -266,8 +255,10 @@ button {
   bottom: 64px;
 }
 
+.builder-home-button:hover,
 .align-button:hover:not(:disabled),
-.detail-mode-button:hover {
+.detail-mode-button:hover,
+.nn-ai-coach-toggle:hover {
   background: #2f2f2f;
   border-color: #4a4a4a;
 }
@@ -288,6 +279,25 @@ button {
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
+}
+
+.build-tab-panel {
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.test-tab-panel {
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 10px;
+}
+
+.test-main-card {
+  flex: 0 0 auto;
 }
 
 .panel-card {
@@ -381,7 +391,6 @@ button {
 }
 
 .deploy-actions .btn {
-  width: 100%;
   min-height: 40px;
   height: 40px;
   padding: 0 12px;
@@ -1402,6 +1411,35 @@ button {
   color: rgba(255, 255, 255, 0.8);
 }
 
+.inference-image-guess {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.inference-image-guess-pending {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.inference-image-guess-correct {
+  color: #7cf2b8;
+  border-color: rgba(124, 242, 184, 0.45);
+  background: rgba(124, 242, 184, 0.12);
+}
+
+.inference-image-guess-wrong {
+  color: #ff8f8f;
+  border-color: rgba(255, 143, 143, 0.45);
+  background: rgba(255, 143, 143, 0.1);
+}
+
 .inference-image-selection {
   min-height: 32px;
   display: flex;
@@ -1939,8 +1977,8 @@ button {
 
 .nn-ai-coach-dock {
   position: absolute;
-  top: 14px;
-  right: 14px;
+  top: 18px;
+  right: 70px;
   bottom: 14px;
   z-index: 4;
   display: flex;
@@ -1951,16 +1989,9 @@ button {
 }
 
 .nn-ai-coach-toggle {
-  width: 36px;
-  height: 36px;
-  border-radius: 999px;
-  border: 1px solid rgba(147, 197, 253, 0.45);
-  background: rgba(37, 99, 235, 0.35);
-  color: #dbeafe;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
   pointer-events: auto;
   flex-shrink: 0;
   cursor: pointer;

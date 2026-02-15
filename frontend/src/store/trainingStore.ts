@@ -83,10 +83,32 @@ const DEFAULT_CONFIG: TrainingConfig = {
   loss: 'cross_entropy',
 }
 
-const SYNTHETIC_GRID_SIZE = 17
+const SYNTHETIC_GRID_SIZE = 23
 const SYNTHETIC_RADIUS = 1.4
 const SYNTHETIC_PATH_LIMIT = 256
 const MAX_METRIC_POINTS = 420
+
+interface SyntheticGaussianFeature {
+  x: number
+  z: number
+  radius: number
+  weight: number
+}
+
+interface SyntheticSurfaceParams {
+  bowl: number
+  bowlCenterX: number
+  bowlCenterZ: number
+  offset: number
+  phaseA: number
+  phaseB: number
+  phaseC: number
+  waveA: number
+  waveB: number
+  waveC: number
+  ridge: number
+  gaussianFeatures: SyntheticGaussianFeature[]
+}
 
 export const useTrainingStore = create<TrainingState>((set) => ({
   status: 'idle',
@@ -213,13 +235,54 @@ function createSyntheticLandscape(
   const random = mulberry32(seed)
   const radius = SYNTHETIC_RADIUS + random() * 0.4
   const axis = createAxis(SYNTHETIC_GRID_SIZE, radius)
-  const phase = random() * Math.PI * 2
-  const bowl = 0.72 + random() * 0.38
-  const wave = 0.16 + random() * 0.2
-  const cross = 0.12 + random() * 0.14
-  const offset = 0.24 + random() * 0.36
+  const phaseA = random() * Math.PI * 2
+  const phaseB = random() * Math.PI * 2
+  const phaseC = random() * Math.PI * 2
+  const bowlCenterX = (random() - 0.5) * radius * 0.36
+  const bowlCenterZ = (random() - 0.5) * radius * 0.36
+  const bowl = 0.52 + random() * 0.38
+  const offset = 0.28 + random() * 0.24
+
+  const globalWell: SyntheticGaussianFeature = {
+    x: (random() - 0.5) * radius * 0.3,
+    z: (random() - 0.5) * radius * 0.3,
+    radius: radius * (0.34 + random() * 0.2),
+    weight: -(0.42 + random() * 0.32),
+  }
+
+  const localWellCount = 4 + Math.floor(random() * 4)
+  const localWells: SyntheticGaussianFeature[] = Array.from({ length: localWellCount }, () => ({
+    x: (random() * 2 - 1) * radius * 0.92,
+    z: (random() * 2 - 1) * radius * 0.92,
+    radius: radius * (0.1 + random() * 0.16),
+    weight: -(0.08 + random() * 0.2),
+  }))
+
+  const localHillCount = 3 + Math.floor(random() * 4)
+  const localHills: SyntheticGaussianFeature[] = Array.from({ length: localHillCount }, () => ({
+    x: (random() * 2 - 1) * radius * 0.95,
+    z: (random() * 2 - 1) * radius * 0.95,
+    radius: radius * (0.08 + random() * 0.18),
+    weight: 0.08 + random() * 0.22,
+  }))
+
+  const surfaceParams: SyntheticSurfaceParams = {
+    bowl,
+    bowlCenterX,
+    bowlCenterZ,
+    offset,
+    phaseA,
+    phaseB,
+    phaseC,
+    waveA: 0.14 + random() * 0.16,
+    waveB: 0.12 + random() * 0.14,
+    waveC: 0.08 + random() * 0.12,
+    ridge: 0.08 + random() * 0.14,
+    gaussianFeatures: [globalWell, ...localWells, ...localHills],
+  }
+
   const gridLoss = axis.map((z) =>
-    axis.map((x) => syntheticSurfaceLoss(x, z, phase, bowl, wave, cross, offset))
+    axis.map((x) => syntheticSurfaceLoss(x, z, surfaceParams))
   )
   const center = Math.floor(axis.length / 2)
   const centerLoss = gridLoss[center]?.[center] ?? 0.5
@@ -327,18 +390,41 @@ function sampleSurfaceGrid(landscape: LossLandscapeData, x: number, z: number): 
 function syntheticSurfaceLoss(
   x: number,
   z: number,
-  phase: number,
-  bowl: number,
-  wave: number,
-  cross: number,
-  offset: number
+  params: SyntheticSurfaceParams
 ): number {
-  const bowlTerm = bowl * (x * x + 0.84 * z * z)
+  const xShifted = x - params.bowlCenterX
+  const zShifted = z - params.bowlCenterZ
+  const bowlTerm = params.bowl * (
+    0.94 * xShifted * xShifted +
+    0.78 * zShifted * zShifted +
+    0.18 * xShifted * zShifted
+  )
   const waveTerm =
-    wave * Math.sin(x * 2.24 + phase) +
-    cross * Math.cos(z * 2.06 - phase * 0.62) +
-    0.08 * Math.sin((x + z) * 1.66 + phase * 0.28)
-  return Number(Math.max(0.02, offset + bowlTerm + waveTerm).toFixed(6))
+    params.waveA * Math.sin(x * 2.46 + params.phaseA) +
+    params.waveB * Math.cos(z * 2.22 - params.phaseB * 0.64) +
+    params.waveC * Math.sin((x + z) * 1.94 + params.phaseC * 0.5)
+  const ridgeTerm =
+    params.ridge * Math.abs(Math.sin(x * 3.4 + params.phaseC)) +
+    params.ridge * 0.62 * Math.abs(Math.cos(z * 3.08 - params.phaseA))
+  const microTerm =
+    0.06 *
+    Math.sin((x - z) * 4.3 + params.phaseA * 0.35) *
+    Math.cos((x + z) * 3.6 - params.phaseB * 0.22)
+
+  const gaussianTerm = params.gaussianFeatures.reduce((total, feature) => {
+    const dx = x - feature.x
+    const dz = z - feature.z
+    const sigmaSq = Math.max(0.001, feature.radius * feature.radius)
+    const influence = Math.exp(-(dx * dx + dz * dz) / (2 * sigmaSq))
+    return total + feature.weight * influence
+  }, 0)
+
+  return Number(
+    Math.max(
+      0.015,
+      params.offset + bowlTerm + waveTerm + ridgeTerm + microTerm + gaussianTerm
+    ).toFixed(6)
+  )
 }
 
 function createAxis(size: number, radius: number): number[] {

@@ -17,8 +17,7 @@ interface TestTabProps {
   padDisabled: boolean
   inferenceTopPrediction: number | null
   imageSamples: InferenceDatasetSample[]
-  selectedImageSampleId: string | null
-  onSelectImageSample: (sampleId: string) => void
+  imageSamplePredictions: Record<string, number | null>
   imageSamplesLoading: boolean
   imageSamplesError: string | null
   onInferModel: () => void
@@ -33,8 +32,7 @@ export function TestTab({
   padDisabled,
   inferenceTopPrediction,
   imageSamples,
-  selectedImageSampleId,
-  onSelectImageSample,
+  imageSamplePredictions,
   imageSamplesLoading,
   imageSamplesError,
   onInferModel,
@@ -42,8 +40,14 @@ export function TestTab({
   inferLabel,
 }: TestTabProps) {
   const isCatsVsDogs = datasetId === 'cats_vs_dogs'
-  const selectedSample =
-    imageSamples.find((sample) => sample.id === selectedImageSampleId) ?? null
+  const getPredictionLabel = (prediction: number | null | undefined) => {
+    if (prediction === undefined) return 'running...'
+    if (prediction === null) return 'none'
+    if (!isCatsVsDogs) return String(prediction)
+    if (prediction === 0) return 'cat'
+    if (prediction === 1) return 'dog'
+    return String(prediction)
+  }
   const predictionLabel =
     inferenceTopPrediction === null
       ? 'none'
@@ -54,17 +58,24 @@ export function TestTab({
             ? 'dog (1)'
             : String(inferenceTopPrediction)
         : String(inferenceTopPrediction)
+  const evaluatedCount = imageSamples.reduce((count, sample) => {
+    const prediction = imageSamplePredictions[sample.id]
+    return typeof prediction === 'number' ? count + 1 : count
+  }, 0)
+  const correctCount = imageSamples.reduce((count, sample) => {
+    const prediction = imageSamplePredictions[sample.id]
+    return typeof prediction === 'number' && prediction === sample.label ? count + 1 : count
+  }, 0)
+  const accuracyLabel =
+    evaluatedCount > 0 ? `${((correctCount / evaluatedCount) * 100).toFixed(1)}%` : 'N/A'
 
   return (
-    <div className="tab-panel">
-      <section className="panel-card panel-card-fill">
+    <div className="tab-panel test-tab-panel">
+      <section className="panel-card panel-card-fill test-main-card">
         {isCatsVsDogs ? (
           <div className="inference-image-samples">
             <div className="inference-image-samples-head">
               <p className="inference-image-samples-title">Cats vs Dogs Samples (96x96)</p>
-              <p className="inference-image-samples-subtitle">
-                Choose a real dataset image for inference.
-              </p>
               {imageSamplesLoading ? (
                 <p className="inference-image-samples-meta">Loading samples...</p>
               ) : imageSamplesError ? (
@@ -76,33 +87,32 @@ export function TestTab({
 
             <div className="inference-image-grid">
               {imageSamples.map((sample) => (
-                <button
+                <div
                   key={sample.id}
-                  type="button"
-                  onClick={() => onSelectImageSample(sample.id)}
-                  className={`inference-image-tile ${
-                    selectedImageSampleId === sample.id
-                      ? 'inference-image-tile-selected'
-                      : 'inference-image-tile-idle'
-                  }`}
+                  className="inference-image-tile"
                 >
                   <img src={sample.image_data_url} alt={sample.filename} className="inference-image-preview" />
                   <span className="inference-image-label">{sample.label_name}</span>
-                </button>
+                  <span
+                    className={`inference-image-guess ${
+                      imageSamplePredictions[sample.id] === undefined
+                        ? 'inference-image-guess-pending'
+                        : imageSamplePredictions[sample.id] === sample.label
+                          ? 'inference-image-guess-correct'
+                          : 'inference-image-guess-wrong'
+                    }`}
+                  >
+                    Guess: {getPredictionLabel(imageSamplePredictions[sample.id])}
+                  </span>
+                </div>
               ))}
-            </div>
-
-            <div className="inference-image-selection">
-              {selectedSample
-                ? `Selected: ${selectedSample.filename} (${selectedSample.label_name})`
-                : 'No sample selected.'}
             </div>
           </div>
         ) : (
           <InferencePixelPad grid={inferenceGrid} setGrid={setInferenceGrid} disabled={padDisabled} />
         )}
         <div className="inference-top-prediction">
-          Top Prediction: {predictionLabel}
+          {isCatsVsDogs ? `Accuracy: ${accuracyLabel}` : `Top Prediction: ${predictionLabel}`}
         </div>
       </section>
 

@@ -258,8 +258,10 @@ function TrainGraphsBlock({
   totalEpochs,
   lossLandscape,
 }: TrainGraphsBlockProps) {
-  const trainChartBounds = getChartBounds(trainAccuracySeries, trainLossSeries)
-  const testChartBounds = getChartBounds(testAccuracySeries, testLossSeries)
+  const trainAccuracyPercentSeries = toPercentSeries(trainAccuracySeries)
+  const trainLossPercentSeries = toPercentSeries(trainLossSeries)
+  const testAccuracyPercentSeries = toPercentSeries(testAccuracySeries)
+  const testLossPercentSeries = toPercentSeries(testLossSeries)
 
   return (
     <div className="train-graphs train-graph-block">
@@ -271,16 +273,16 @@ function TrainGraphsBlock({
               <MetricLineChart
                 primaryLabel="Train Accuracy"
                 secondaryLabel="Train Loss"
-              primaryValues={trainAccuracySeries}
-              secondaryValues={trainLossSeries}
-              minValue={trainChartBounds.min}
-              maxValue={trainChartBounds.max}
-              primaryColor={TRAIN_ACC_COLOR}
-              secondaryColor={TRAIN_LOSS_COLOR}
-              xAxisLabel="Epoch"
-              yAxisLabel="Value"
-              xTickStep={0.05}
-              yTickStep={0.05}
+                primaryValues={trainAccuracyPercentSeries}
+                secondaryValues={trainLossPercentSeries}
+                minValue={0}
+                maxValue={100}
+                primaryColor={TRAIN_ACC_COLOR}
+                secondaryColor={TRAIN_LOSS_COLOR}
+                xAxisLabel="Epoch"
+                yAxisLabel="Value (%)"
+                xTickStep={0.05}
+                yTickStep={0.05}
               />
             </div>
           </div>
@@ -291,16 +293,16 @@ function TrainGraphsBlock({
               <MetricLineChart
                 primaryLabel="Test Accuracy"
                 secondaryLabel="Test Loss"
-              primaryValues={testAccuracySeries}
-              secondaryValues={testLossSeries}
-              minValue={testChartBounds.min}
-              maxValue={testChartBounds.max}
-              primaryColor={TEST_ACC_COLOR}
-              secondaryColor={TEST_LOSS_COLOR}
-              xAxisLabel="Epoch"
-              yAxisLabel="Value"
-              xTickStep={0.05}
-              yTickStep={0.05}
+                primaryValues={testAccuracyPercentSeries}
+                secondaryValues={testLossPercentSeries}
+                minValue={0}
+                maxValue={100}
+                primaryColor={TEST_ACC_COLOR}
+                secondaryColor={TEST_LOSS_COLOR}
+                xAxisLabel="Epoch"
+                yAxisLabel="Value (%)"
+                xTickStep={0.05}
+                yTickStep={0.05}
               />
             </div>
           </div>
@@ -353,27 +355,11 @@ function formatAccuracyValue(accuracy: number | null): string {
   return `${(accuracy * 100).toFixed(1)}%`
 }
 
-function getChartBounds(
-  primaryValues: number[],
-  secondaryValues: number[]
-): { min: number; max: number } {
-  const values = [...primaryValues, ...secondaryValues].filter((value) =>
-    Number.isFinite(value)
-  )
-  if (values.length === 0) {
-    return { min: 0, max: 1 }
-  }
-
-  const rawMin = Math.min(...values)
-  const rawMax = Math.max(...values)
-  const span = Math.max(rawMax - rawMin, 0.05)
-  const paddedMin = Math.max(0, rawMin - span * 0.06)
-  const paddedMax = rawMax + span * 0.02
-
-  return {
-    min: paddedMin,
-    max: Math.max(paddedMax, paddedMin + 0.1),
-  }
+function toPercentSeries(values: number[]): number[] {
+  return values.map((value) => {
+    if (!Number.isFinite(value)) return 0
+    return value * 100
+  })
 }
 
 const OPTIMIZER_OPTIONS = ['adam', 'sgd']

@@ -53,6 +53,7 @@ export function SceneManager({ lowDetailMode }: SceneManagerProps) {
   const randomEdgeCenterByIdRef = useRef<Map<string, number>>(new Map())
   const randomEdgeValueByIdRef = useRef<Map<string, number>>(new Map())
   const previousWavePhaseRef = useRef<TrainingFlowPhase | null>(null)
+  const prevTrainingStatusRef = useRef(trainingStatus)
 
   useEffect(() => {
     const activeEdgeIds = new Set(Object.keys(edges))
@@ -79,6 +80,18 @@ export function SceneManager({ lowDetailMode }: SceneManagerProps) {
       }
     })
   }, [edges])
+
+  useEffect(() => {
+    const previousStatus = prevTrainingStatusRef.current
+    if (trainingStatus === 'training' && previousStatus !== 'training') {
+      const values = randomEdgeValueByIdRef.current
+      Object.keys(edges).forEach((edgeId) => {
+        values.set(edgeId, 0)
+      })
+      previousWavePhaseRef.current = null
+    }
+    prevTrainingStatusRef.current = trainingStatus
+  }, [edges, trainingStatus])
 
   const epochWaveStartMsRef = useRef<number | null>(null)
   const prevEpochRef = useRef(0)

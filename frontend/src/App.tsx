@@ -32,7 +32,7 @@ const DEFAULT_ACTIVATION = 'linear'
 const DEFAULT_INFERENCE_ROWS = 28
 const DEFAULT_INFERENCE_COLS = 28
 const LOW_DETAIL_STORAGE_KEY = 'mlcanvas.nn.low_detail_mode'
-const DATASET_IMAGE_SAMPLE_LIMIT = 8
+const DATASET_IMAGE_SAMPLE_LIMIT = 32
 const DATASET_CATS_VS_DOGS = 'cats_vs_dogs'
 const ACTIVATION_OPTIONS = [
   'linear',
@@ -160,6 +160,21 @@ function predictionLabelForDataset(datasetId: string, prediction: number | null)
   return String(prediction)
 }
 
+async function inferSinglePrediction(
+  jobId: string,
+  inputs: number[][][]
+): Promise<number | null> {
+  const response = await requestJson<InferResponse>('/api/model/infer', {
+    method: 'POST',
+    body: JSON.stringify({
+      job_id: jobId,
+      inputs,
+      return_probabilities: true,
+    }),
+  })
+  return response.predictions?.[0] ?? null
+}
+
 function App() {
   useConnectionDraw()
 
@@ -278,10 +293,10 @@ function App() {
     createEmptyInferenceGrid(inferenceGridSize.rows, inferenceGridSize.cols)
   )
   const [inferenceSamples, setInferenceSamples] = useState<InferenceDatasetSample[]>([])
-  const [selectedInferenceSampleId, setSelectedInferenceSampleId] = useState<string | null>(null)
   const [inferenceSamplesLoading, setInferenceSamplesLoading] = useState(false)
   const [inferenceSamplesError, setInferenceSamplesError] = useState<string | null>(null)
   const [inferenceTopPrediction, setInferenceTopPrediction] = useState<number | null>(null)
+  const [imageSamplePredictions, setImageSamplePredictions] = useState<Record<string, number | null>>({})
   const [deployment, setDeployment] = useState<DeploymentResponse | null>(null)
   const [deployTarget, setDeployTarget] = useState<DeployTarget>('local')
   const [deployTopPrediction, setDeployTopPrediction] = useState<number | null>(null)
@@ -289,9 +304,7 @@ function App() {
   const isEditingName = Boolean(editingNodeId && editingNodeId === selectedNodeId)
   const isBackendBusy = backendBusyAction !== null
   const usesImageInferenceSamples = trainingConfig.dataset === DATASET_CATS_VS_DOGS
-  const selectedInferenceSample = inferenceSamples.find(
-    (sample) => sample.id === selectedInferenceSampleId
-  ) ?? null
+  const selectedInferenceSample = usesImageInferenceSamples ? (inferenceSamples[0] ?? null) : null
   const latestTrainingMetric = trainingMetrics[trainingMetrics.length - 1]
   const latestTrainLoss = latestTrainingMetric
     ? latestTrainingMetric.trainLoss ?? latestTrainingMetric.loss
@@ -322,7 +335,7 @@ function App() {
     Boolean(deployment) || (Boolean(trainingJobId) && trainingStatus === 'complete')
   const requiresImageSampleSelection =
     usesImageInferenceSamples &&
-    (inferenceSamplesLoading || !selectedInferenceSample || inferenceSamples.length === 0)
+    (inferenceSamplesLoading || inferenceSamples.length === 0)
   const activeTabIndex =
     activeTab === 'validate' ? 0 : activeTab === 'train' ? 1 : activeTab === 'infer' ? 2 : 3
 
@@ -389,9 +402,9 @@ function App() {
   useEffect(() => {
     if (!usesImageInferenceSamples) {
       setInferenceSamples([])
-      setSelectedInferenceSampleId(null)
       setInferenceSamplesLoading(false)
       setInferenceSamplesError(null)
+      setImageSamplePredictions({})
       return
     }
 
@@ -406,9 +419,14 @@ function App() {
         if (cancelled) return
         const samples = Array.isArray(response.samples) ? response.samples : []
         setInferenceSamples(samples)
-        setSelectedInferenceSampleId((prev) => {
-          if (prev && samples.some((sample) => sample.id === prev)) return prev
-          return samples[0]?.id ?? null
+        setImageSamplePredictions((prev) => {
+          const next: Record<string, number | null> = {}
+          samples.forEach((sample) => {
+            if (Object.prototype.hasOwnProperty.call(prev, sample.id)) {
+              next[sample.id] = prev[sample.id] ?? null
+            }
+          })
+          return next
         })
         if (samples.length === 0) {
           setInferenceSamplesError('No dataset samples available for inference.')
@@ -422,8 +440,8 @@ function App() {
             ? 'Backend endpoint /api/model/inference-samples is missing. Restart backend from latest code.'
             : message
         setInferenceSamples([])
-        setSelectedInferenceSampleId(null)
         setInferenceSamplesError(friendlyMessage)
+        setImageSamplePredictions({})
       })
       .finally(() => {
         if (!cancelled) setInferenceSamplesLoading(false)
@@ -433,6 +451,53 @@ function App() {
       cancelled = true
     }
   }, [usesImageInferenceSamples])
+
+  useEffect(() => {
+    if (!usesImageInferenceSamples || trainingStatus === 'complete') return
+    setImageSamplePredictions({})
+  }, [usesImageInferenceSamples, trainingStatus, trainingJobId])
+
+  useEffect(() => {
+    if (!usesImageInferenceSamples) return
+    if (!trainingJobId || trainingStatus !== 'complete') return
+    if (isBackendBusy) return
+    if (inferenceSamplesLoading || inferenceSamplesError) return
+
+    const nextSample = inferenceSamples.find(
+      (sample) => imageSamplePredictions[sample.id] === undefined
+    )
+    if (!nextSample) return
+
+    let cancelled = false
+    inferSinglePrediction(trainingJobId, nextSample.inputs)
+      .then((prediction) => {
+        if (cancelled) return
+        setImageSamplePredictions((prev) => ({
+          ...prev,
+          [nextSample.id]: prediction,
+        }))
+      })
+      .catch(() => {
+        if (cancelled) return
+        setImageSamplePredictions((prev) => ({
+          ...prev,
+          [nextSample.id]: null,
+        }))
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    usesImageInferenceSamples,
+    trainingJobId,
+    trainingStatus,
+    isBackendBusy,
+    inferenceSamples,
+    inferenceSamplesLoading,
+    inferenceSamplesError,
+    imageSamplePredictions,
+  ])
 
   const handleAddLayer = () => {
     const state = useGraphStore.getState()
@@ -744,8 +809,33 @@ function App() {
   const handleTrainModel = () =>
     runBackendAction('train', async () => {
       if (!hasValidatedModel) {
-        setActiveTab('validate')
-        throw new Error('Validate the model first.')
+        const validatePayload = serializeForBackend()
+        if (validatePayload.nodes.length === 0) {
+          throw new Error('Add at least one layer before training.')
+        }
+
+        const validation = await requestJson<ValidationResponse>('/api/model/validate', {
+          method: 'POST',
+          body: JSON.stringify(validatePayload),
+        })
+
+        setBuildWarnings(validation.warnings ?? [])
+        if (!validation.valid) {
+          const issues =
+            validation.errors.length > 0
+              ? validation.errors.map((issue) => formatValidationIssue(issue))
+              : ['Graph validation failed.']
+          const firstError = issues[0] ?? 'Graph validation failed.'
+          setBuildStatus('error')
+          setBuildIssues(issues)
+          setHasValidatedModel(false)
+          setActiveTab('validate')
+          throw new Error(firstError)
+        }
+
+        setBuildStatus('success')
+        setBuildIssues([])
+        setHasValidatedModel(true)
       }
       const payload = serializeForBackend()
       if (payload.nodes.length === 0) {
@@ -799,20 +889,17 @@ function App() {
         ? selectedInferenceSample!.inputs
         : inferenceGridToPayload(inferenceGrid)
 
-      const response = await requestJson<InferResponse>('/api/model/infer', {
-        method: 'POST',
-        body: JSON.stringify({
-          job_id: trainingJobId,
-          inputs: inferInputs,
-          return_probabilities: true,
-        }),
-      })
-
-      const nextPrediction = response.predictions?.[0]
+      const nextPrediction = await inferSinglePrediction(trainingJobId, inferInputs)
       setInferenceTopPrediction(nextPrediction ?? null)
+      if (usesImageInferenceSamples && selectedInferenceSample) {
+        setImageSamplePredictions((prev) => ({
+          ...prev,
+          [selectedInferenceSample.id]: nextPrediction,
+        }))
+      }
       setActiveTab('infer')
       setBackendMessage(
-        nextPrediction !== undefined
+        nextPrediction !== null
           ? `Inference complete. Predicted class ${predictionLabelForDataset(trainingConfig.dataset, nextPrediction)}.`
           : 'Inference complete.'
       )
@@ -1061,7 +1148,7 @@ function App() {
               stopDisabled={isBackendBusy || !trainingJobId}
               stopLabel={backendBusyAction === 'stop' ? 'Stopping...' : 'Stop Training'}
               onTrainModel={handleTrainModel}
-              trainDisabled={isBackendBusy || !hasValidatedModel || layerCount === 0}
+              trainDisabled={isBackendBusy || layerCount === 0}
               trainLabel={backendBusyAction === 'train' ? 'Training...' : 'Train'}
             />
           ) : null}
@@ -1074,8 +1161,7 @@ function App() {
               padDisabled={isBackendBusy || !trainingJobId || trainingStatus !== 'complete'}
               inferenceTopPrediction={inferenceTopPrediction}
               imageSamples={inferenceSamples}
-              selectedImageSampleId={selectedInferenceSampleId}
-              onSelectImageSample={setSelectedInferenceSampleId}
+              imageSamplePredictions={imageSamplePredictions}
               imageSamplesLoading={inferenceSamplesLoading}
               imageSamplesError={inferenceSamplesError}
               onInferModel={handleInferModel}

@@ -11,21 +11,21 @@ class ComputeNodeError(RuntimeError):
 
 
 class ComputeNodeClient:
-    def __init__(self) -> None:
-        self._base_url = os.getenv("VLM_COMPUTE_NODE_URL", "").strip().rstrip("/")
-        timeout_raw = os.getenv("VLM_COMPUTE_NODE_TIMEOUT_SECONDS", "30").strip()
-        try:
-            self._timeout_seconds = max(1.0, float(timeout_raw))
-        except ValueError:
-            self._timeout_seconds = 30.0
-
     @property
     def enabled(self) -> bool:
-        return self._base_url != ""
+        return self.base_url != ""
 
     @property
     def base_url(self) -> str:
-        return self._base_url
+        return os.getenv("VLM_COMPUTE_NODE_URL", "").strip().rstrip("/")
+
+    @property
+    def timeout_seconds(self) -> float:
+        timeout_raw = os.getenv("VLM_COMPUTE_NODE_TIMEOUT_SECONDS", "30").strip()
+        try:
+            return max(1.0, float(timeout_raw))
+        except ValueError:
+            return 30.0
 
     def websocket_url(self, path: str) -> str:
         if not self.enabled:
@@ -34,10 +34,11 @@ class ComputeNodeClient:
             suffix = path
         else:
             suffix = f"/{path}"
-        if self._base_url.startswith("https://"):
-            return f"wss://{self._base_url[len('https://') :]}{suffix}"
-        if self._base_url.startswith("http://"):
-            return f"ws://{self._base_url[len('http://') :]}{suffix}"
+        base_url = self.base_url
+        if base_url.startswith("https://"):
+            return f"wss://{base_url[len('https://') :]}{suffix}"
+        if base_url.startswith("http://"):
+            return f"ws://{base_url[len('http://') :]}{suffix}"
         raise ComputeNodeError("VLM_COMPUTE_NODE_URL must start with http:// or https://")
 
     async def infer(
@@ -56,8 +57,8 @@ class ComputeNodeClient:
             "score_threshold": score_threshold,
             "max_detections": max_detections,
         }
-        url = f"{self._base_url}/api/v1/vlm/infer"
-        timeout = httpx.Timeout(self._timeout_seconds)
+        url = f"{self.base_url}/api/v1/vlm/infer"
+        timeout = httpx.Timeout(self.timeout_seconds)
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(url, json=payload)

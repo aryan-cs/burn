@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from core.vlm_training_engine import run_vlm_training_job
 
 
 router = APIRouter(prefix="/api/vlm", tags=["vlm"])
+logger = logging.getLogger(__name__)
 ARTIFACTS_DIR = Path(__file__).resolve().parents[1] / "artifacts"
 DEFAULT_VLM_DATASET_ID = "synthetic_boxes_tiny"
 
@@ -277,6 +279,12 @@ async def vlm_infer(payload: VLMInferRequest) -> dict[str, Any]:
 
     remote_warning: str | None = None
     if artifact_path is None and compute_node_client.enabled:
+        logger.info(
+            "VLM infer attempting remote compute request: url=%s model_id=%s job_id=%s",
+            compute_node_client.base_url,
+            model_id,
+            resolved_job_id,
+        )
         try:
             remote_response = await compute_node_client.infer(
                 image_base64=payload.image_base64,
@@ -294,6 +302,14 @@ async def vlm_infer(payload: VLMInferRequest) -> dict[str, Any]:
                 or remote_response.get("model_id")
                 or model_id
             )
+            remote_device = str(remote_response.get("runtime_device", "unknown"))
+            logger.info(
+                "VLM infer routed to compute node: model_id=%s backend=%s device=%s job_id=%s",
+                remote_model_id,
+                remote_backend,
+                remote_device,
+                resolved_job_id,
+            )
             return {
                 "job_id_used": resolved_job_id,
                 "runtime_backend": f"remote:{remote_backend}",
@@ -305,6 +321,16 @@ async def vlm_infer(payload: VLMInferRequest) -> dict[str, Any]:
             }
         except ComputeNodeError as exc:
             remote_warning = f"Remote compute node unavailable ({exc}); using local backend."
+            logger.warning("VLM infer remote compute unavailable; falling back local: %s", exc)
+
+    if artifact_path is not None:
+        logger.info(
+            "VLM infer using local artifact model: artifact_path=%s job_id=%s",
+            artifact_path,
+            resolved_job_id,
+        )
+    elif not compute_node_client.enabled:
+        logger.info("VLM infer using local runtime because compute node is not configured")
 
     image = _decode_data_url_image(payload.image_base64)
     runtime = vlm_runtime.ensure_model(model_id)
@@ -319,6 +345,12 @@ async def vlm_infer(payload: VLMInferRequest) -> dict[str, Any]:
         warning = f"{remote_warning} {warning}"
     elif remote_warning:
         warning = remote_warning
+    logger.info(
+        "VLM infer served by local runtime: backend=%s model_id=%s job_id=%s",
+        runtime.backend,
+        runtime.model_id,
+        resolved_job_id,
+    )
     return {
         "job_id_used": resolved_job_id,
         "runtime_backend": runtime.backend,

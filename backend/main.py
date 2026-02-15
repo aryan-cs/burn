@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+
+BACKEND_DIR = Path(__file__).resolve().parent
+REPO_ROOT = BACKEND_DIR.parent
+load_dotenv(BACKEND_DIR / ".env", override=False)
+load_dotenv(REPO_ROOT / ".env", override=False)
 
 from routers.deploy import router as deploy_router
 from routers.datasets import router as datasets_router
@@ -20,13 +27,18 @@ from routers.ml_model import router as ml_model_router
 from routers.ml_websocket import router as ml_ws_router
 from routers.ai_coach import router as ai_coach_router
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     artifacts_dir = Path(__file__).resolve().parent / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
+    compute_node_url = os.getenv("VLM_COMPUTE_NODE_URL", "").strip()
+    if compute_node_url:
+        logger.info("VLM compute node configured at %s", compute_node_url)
+    else:
+        logger.info("VLM compute node is not configured; local VLM runtime will be used")
     yield
 
 

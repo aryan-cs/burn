@@ -178,6 +178,10 @@
   box-shadow: inset 0 0 0 1px rgba(114, 248, 220, 0.16);
 }
 
+.hub-family-panel-linreg {
+  box-shadow: inset 0 0 0 1px rgba(255, 180, 41, 0.2);
+}
+
 .hub-family-head {
   display: flex;
   align-items: baseline;

@@ -61,8 +61,8 @@ const SCRATCH_CARDS: LaunchCard[] = [
   {
     title: 'Linear Regression Builder',
     subtitle: 'Start From Scratch',
-    description: 'Coming soon!',
-    href: '#',
+    description: 'Build and train a real linear regression model with live fit visualization.',
+    href: '/linreg?mode=scratch',
     badge: LINREG,
     tone: 'linreg',
   },
@@ -133,11 +133,28 @@ const PRESET_CARDS: LaunchCard[] = [
     badge: VLM,
     tone: 'vlm',
   },
+  {
+    title: 'Study Hours Regressor',
+    subtitle: 'Preset Project',
+    description: 'Predict exam score from study hours with a beginner-friendly linear regression workflow.',
+    href: '/linreg?mode=preset&template=study_hours_baseline',
+    badge: LINREG,
+    tone: 'linreg',
+  },
+  {
+    title: 'Home Value Tiny Regressor',
+    subtitle: 'Preset Project',
+    description: 'Simple housing-style price regression with one input feature (area).',
+    href: '/linreg?mode=preset&template=home_value_baseline',
+    badge: LINREG,
+    tone: 'linreg',
+  },
 ]
 
 const NN_PRESET_CARDS = PRESET_CARDS.filter((card) => card.tone === 'nn')
 const RF_PRESET_CARDS = PRESET_CARDS.filter((card) => card.tone === 'rf')
 const VLM_PRESET_CARDS = PRESET_CARDS.filter((card) => card.tone === 'vlm')
+const LINREG_PRESET_CARDS = PRESET_CARDS.filter((card) => card.tone === 'linreg')
 
 function LaunchCardView({ card }: { card: LaunchCard }) {
   return (
@@ -229,6 +246,18 @@ export default function ModelHubPage() {
               </header>
               <div className="hub-grid hub-grid-family">
                 {VLM_PRESET_CARDS.map((card) => (
+                  <LaunchCardView key={card.title} card={card} />
+                ))}
+              </div>
+            </article>
+
+            <article className="hub-family-panel hub-family-panel-linreg">
+              <header className="hub-family-head">
+                <div className="hub-family-label">Linear Regression</div>
+                <div className="hub-family-meta">Gradient Descent · Fit Visualization</div>
+              </header>
+              <div className="hub-grid hub-grid-family">
+                {LINREG_PRESET_CARDS.map((card) => (
                   <LaunchCardView key={card.title} card={card} />
                 ))}
               </div>

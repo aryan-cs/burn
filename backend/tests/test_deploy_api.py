@@ -116,6 +116,62 @@ def test_remote_target_rejected(monkeypatch, client, tmp_path) -> None:
     assert "supported deployment targets" in res.text.lower()
 
 
+def test_external_linreg_deployment_visible_and_start_stop(client) -> None:
+    create_res = client.post(
+        "/api/deploy/external",
+        json={
+            "model_family": "linreg",
+            "target": "local",
+            "job_id": "linreg_study_hours_demo",
+            "name": "Study Hours Endpoint",
+            "runtime_config": {
+                "weights": [2.0],
+                "bias": 1.0,
+                "means": [0.0],
+                "stds": [1.0],
+            },
+        },
+    )
+    assert create_res.status_code == 200
+    created = create_res.json()
+    deployment_id = created["deployment_id"]
+    assert created["model_family"] == "linreg"
+    assert created["status"] == "running"
+
+    list_res = client.get("/api/deploy/list")
+    assert list_res.status_code == 200
+    deployments = list_res.json()["deployments"]
+    assert any(item["deployment_id"] == deployment_id for item in deployments)
+
+    infer_res = client.post(
+        f"/api/deploy/{deployment_id}/infer",
+        json={"inputs": [3.5], "return_probabilities": False},
+    )
+    assert infer_res.status_code == 200
+    infer_data = infer_res.json()
+    assert infer_data["model_family"] == "linreg"
+    assert abs(float(infer_data["predictions"][0]) - 8.0) < 1e-6
+
+    touch_res = client.post(
+        f"/api/deploy/{deployment_id}/touch",
+        json={
+            "event": "external_inference_request",
+            "message": "External linreg inference completed.",
+            "details": {"source": "linreg-ui"},
+        },
+    )
+    assert touch_res.status_code == 200
+    assert touch_res.json()["request_count"] >= 2
+
+    stop_res = client.delete(f"/api/deploy/{deployment_id}")
+    assert stop_res.status_code == 200
+    assert stop_res.json()["status"] == "stopped"
+
+    start_res = client.post(f"/api/deploy/{deployment_id}/start")
+    assert start_res.status_code == 200
+    assert start_res.json()["status"] == "running"
+
+
 def test_deploy_can_use_in_memory_job_without_bundle(monkeypatch, client, tmp_path) -> None:
     async def fake_run_training_job(job_id, compiled, training, artifacts_dir, backend_override=None):
         job_registry.set_status(job_id, "running")

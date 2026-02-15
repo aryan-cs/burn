@@ -9,6 +9,7 @@ import base64
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import torch
 from fastapi import APIRouter, HTTPException
@@ -49,6 +50,7 @@ class DeploymentStatusResponse(BaseModel):
     status: str
     target: str
     endpoint_path: str
+    model_family: str = "nn"
     created_at: str
     last_used_at: str | None = None
     request_count: int
@@ -58,6 +60,21 @@ class DeploymentStatusResponse(BaseModel):
 class DeploymentInferenceRequest(BaseModel):
     inputs: Any
     return_probabilities: bool = True
+
+
+class CreateExternalDeploymentRequest(BaseModel):
+    model_family: str
+    target: str = "local"
+    endpoint_path: str | None = None
+    name: str | None = None
+    job_id: str | None = None
+    runtime_config: dict[str, Any] | None = None
+
+
+class DeploymentTouchRequest(BaseModel):
+    event: str = "external_inference_request"
+    message: str = "External inference request handled."
+    details: dict[str, Any] | None = None
 
 
 class DeploymentLogResponse(BaseModel):
@@ -235,6 +252,7 @@ def _entry_to_status(entry: DeploymentEntry) -> DeploymentStatusResponse:
         status=entry.status,
         target=entry.target,
         endpoint_path=entry.endpoint_path,
+        model_family=entry.model_family,
         created_at=entry.created_at.isoformat(),
         last_used_at=entry.last_used_at.isoformat() if isinstance(entry.last_used_at, datetime) else None,
         request_count=entry.request_count,
@@ -250,6 +268,114 @@ def _entry_to_log_response(entry) -> DeploymentLogResponse:
         message=entry.message,
         details=entry.details,
     )
+
+
+def _normalize_model_family(raw: str) -> str:
+    normalized = raw.strip().lower()
+    if normalized in {"nn", "linreg"}:
+        return normalized
+    raise HTTPException(
+        status_code=400,
+        detail={"message": f"Unsupported model_family: {raw}. Supported: nn, linreg"},
+    )
+
+
+def _to_linreg_samples(raw_inputs: Any, expected_features: int) -> list[list[float]]:
+    if not isinstance(raw_inputs, list) or len(raw_inputs) == 0:
+        raise HTTPException(status_code=400, detail={"message": "inputs must be a non-empty list"})
+
+    # Single sample: [x1, x2, ...]
+    if all(not isinstance(item, (list, tuple)) for item in raw_inputs):
+        candidates = [raw_inputs]
+    elif all(isinstance(item, (list, tuple)) for item in raw_inputs):
+        candidates = raw_inputs
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "inputs must be either a feature vector or a batch of feature vectors"},
+        )
+
+    samples: list[list[float]] = []
+    for sample in candidates:
+        if not isinstance(sample, (list, tuple)):
+            raise HTTPException(status_code=400, detail={"message": "Invalid sample format"})
+        if len(sample) != expected_features:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Input vector size is incompatible with deployed linear regression model",
+                    "expected_features": expected_features,
+                    "got_features": len(sample),
+                },
+            )
+        try:
+            samples.append([float(value) for value in sample])
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail={"message": f"Non-numeric input value: {exc}"}) from exc
+
+    return samples
+
+
+def _infer_linreg(deployment_id: str, entry: DeploymentEntry, payload: DeploymentInferenceRequest) -> dict[str, Any]:
+    runtime = entry.runtime_config
+    if not isinstance(runtime, dict):
+        raise HTTPException(
+            status_code=500,
+            detail={"message": "Linear regression deployment runtime config is unavailable"},
+        )
+
+    raw_weights = runtime.get("weights")
+    raw_means = runtime.get("means")
+    raw_stds = runtime.get("stds")
+    raw_bias = runtime.get("bias", 0.0)
+    if not isinstance(raw_weights, list) or len(raw_weights) == 0:
+        raise HTTPException(status_code=500, detail={"message": "Invalid linear regression runtime weights"})
+    if not isinstance(raw_means, list) or len(raw_means) != len(raw_weights):
+        raise HTTPException(status_code=500, detail={"message": "Invalid linear regression runtime means"})
+    if not isinstance(raw_stds, list) or len(raw_stds) != len(raw_weights):
+        raise HTTPException(status_code=500, detail={"message": "Invalid linear regression runtime stds"})
+
+    try:
+        weights = [float(value) for value in raw_weights]
+        means = [float(value) for value in raw_means]
+        stds = [float(value) if abs(float(value)) > 1e-12 else 1.0 for value in raw_stds]
+        bias = float(raw_bias)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail={"message": f"Invalid linear regression runtime payload: {exc}"}) from exc
+
+    samples = _to_linreg_samples(payload.inputs, len(weights))
+
+    predictions: list[float] = []
+    for sample in samples:
+        normalized = [
+            (sample[index] - means[index]) / stds[index]
+            for index in range(len(weights))
+        ]
+        prediction = sum(normalized[index] * weights[index] for index in range(len(weights))) + bias
+        predictions.append(float(prediction))
+
+    deployment_registry.mark_request(deployment_id)
+    deployment_registry.add_log(
+        deployment_id,
+        level="info",
+        event="inference_request",
+        message="Inference request handled successfully.",
+        details={
+            "model_family": "linreg",
+            "request_count": entry.request_count,
+            "batch_size": len(samples),
+            "feature_count": len(weights),
+        },
+    )
+
+    return {
+        "deployment_id": deployment_id,
+        "job_id": entry.job_id,
+        "model_family": "linreg",
+        "input_shape": [len(samples), len(weights)],
+        "output_shape": [len(samples), 1],
+        "predictions": predictions,
+    }
 
 
 @router.post("")
@@ -324,6 +450,41 @@ async def create_deployment(payload: CreateDeploymentRequest) -> DeploymentStatu
     except Exception as exc:
         deployment_registry.mark_stopped(entry.deployment_id)
         raise HTTPException(status_code=500, detail={"message": f"Failed to register Modal deployment: {exc}"}) from exc
+    return _entry_to_status(entry)
+
+
+@router.post("/external")
+async def create_external_deployment(payload: CreateExternalDeploymentRequest) -> DeploymentStatusResponse:
+    target = payload.target.strip().lower()
+    if target != "local":
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "Only local deployment is supported right now. Remote targets are planned next."},
+        )
+
+    model_family = _normalize_model_family(payload.model_family)
+    endpoint_path = payload.endpoint_path.strip() if isinstance(payload.endpoint_path, str) else ""
+    if endpoint_path and not endpoint_path.startswith("/"):
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "endpoint_path must start with '/' when provided."},
+        )
+
+    job_id = (payload.job_id or "").strip()
+    if not job_id:
+        job_id = f"{model_family}_{uuid4().hex[:12]}"
+
+    entry = deployment_registry.create_deployment(
+        job_id=job_id,
+        target=target,
+        name=payload.name,
+        model=None,
+        input_shape=None,
+        num_classes=None,
+        model_family=model_family,
+        endpoint_path=endpoint_path or None,
+        runtime_config=payload.runtime_config,
+    )
     return _entry_to_status(entry)
 
 
@@ -410,7 +571,7 @@ async def start_deployment(deployment_id: str) -> DeploymentStatusResponse:
         deployment_registry.mark_running(deployment_id)
         return _entry_to_status(entry)
 
-    if entry.model is None:
+    if entry.model_family == "nn" and entry.model is None:
         model, input_shape, num_classes = _load_model_from_job(entry.job_id)
         entry.model = model
         entry.input_shape = input_shape
@@ -471,6 +632,17 @@ async def infer_deployment(deployment_id: str, payload: DeploymentInferenceReque
         )
         return modal_response
 
+    if entry.model_family == "linreg":
+        return _infer_linreg(deployment_id, entry, payload)
+
+    if entry.model_family != "nn":
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": f"Inference for model_family '{entry.model_family}' is not supported through /api/deploy/{deployment_id}/infer",
+            },
+        )
+
     if entry.model is None:
         raise HTTPException(status_code=500, detail={"message": "Deployment model is unavailable"})
 
@@ -521,3 +693,20 @@ async def infer_deployment(deployment_id: str, payload: DeploymentInferenceReque
         },
     )
     return response
+
+
+@router.post("/{deployment_id}/touch")
+async def touch_deployment(deployment_id: str, payload: DeploymentTouchRequest) -> DeploymentStatusResponse:
+    entry = deployment_registry.get(deployment_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail={"message": f"Unknown deployment_id: {deployment_id}"})
+
+    deployment_registry.mark_request(deployment_id)
+    deployment_registry.add_log(
+        deployment_id,
+        level="info",
+        event=payload.event,
+        message=payload.message,
+        details=payload.details,
+    )
+    return _entry_to_status(entry)

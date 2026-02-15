@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import DeploymentsPage from './deployments/DeploymentsPage'
 import ModelHubPage from './launch/ModelHubPage'
+import LinearRegressionBootstrapPage from './linreg/LinearRegressionBootstrapPage'
 import NNBootstrapPage from './nn/NNBootstrapPage'
 import RFBootstrapPage from './rf/RFBootstrapPage'
 import VLMBootstrapPage from './vlm/VLMBootstrapPage'
@@ -26,6 +27,7 @@ function resolveEntry() {
   if (path.startsWith('/vlm')) return <VLMBootstrapPage />
   if (path.startsWith('/rf')) return <RFBootstrapPage />
   if (path.startsWith('/nn')) return <NNBootstrapPage />
+  if (path.startsWith('/linreg')) return <LinearRegressionBootstrapPage />
   return <ModelHubPage />
 }
 

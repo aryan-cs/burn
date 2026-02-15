@@ -10,6 +10,7 @@ type RFPreset = {
     randomState: number
     stratify: boolean
     logEveryTrees: number
+    ensembleStrategy: 'bagging' | 'boosting' | 'stacking' | 'averaging'
   }
   forest: {
     n_estimators: number
@@ -31,6 +32,7 @@ const RF_PRESETS: Record<string, RFPreset> = {
       randomState: 42,
       stratify: true,
       logEveryTrees: 5,
+      ensembleStrategy: 'bagging',
     },
     forest: {
       n_estimators: 120,
@@ -50,6 +52,7 @@ const RF_PRESETS: Record<string, RFPreset> = {
       randomState: 7,
       stratify: true,
       logEveryTrees: 10,
+      ensembleStrategy: 'bagging',
     },
     forest: {
       n_estimators: 220,
@@ -69,6 +72,7 @@ const RF_PRESETS: Record<string, RFPreset> = {
       randomState: 21,
       stratify: true,
       logEveryTrees: 8,
+      ensembleStrategy: 'bagging',
     },
     forest: {
       n_estimators: 180,
@@ -89,6 +93,7 @@ const RF_DEFAULT_TRAINING = {
   randomState: 42,
   stratify: true,
   logEveryTrees: 5,
+  ensembleStrategy: 'bagging',
 } as const
 
 export default function RFBootstrapPage() {
@@ -116,7 +121,7 @@ export default function RFBootstrapPage() {
     graph.setTraining({ ...RF_DEFAULT_TRAINING })
 
     if (mode === 'scratch') {
-      graph.clearGraph()
+      graph.resetPreset()
       return
     }
 

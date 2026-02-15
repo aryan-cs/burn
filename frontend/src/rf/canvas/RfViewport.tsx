@@ -17,11 +17,11 @@ export function RfViewport() {
           setConnectionSource(null)
         }}
       >
-        <color attach="background" args={['#031122']} />
-        <ambientLight intensity={0.45} />
+        <color attach="background" args={['#000000']} />
+        <ambientLight intensity={0.5} />
         <directionalLight position={[10, 12, 8]} intensity={0.9} />
-        <pointLight position={[-10, -8, -5]} intensity={0.4} color="#4ab1ff" />
-        <gridHelper args={[36, 36, '#1d3450', '#16283f']} />
+        <pointLight position={[-10, -8, -5]} intensity={0.35} color="#ffb429" />
+        <gridHelper args={[36, 36, '#3b2d14', '#1f1f1f']} />
         <RfSceneManager />
         <OrbitControls
           makeDefault
@@ -29,9 +29,9 @@ export function RfViewport() {
           enableZoom
           enableRotate
           mouseButtons={{
-            LEFT: undefined,
-            MIDDLE: 2,
-            RIGHT: 1,
+            LEFT: 0,
+            MIDDLE: 1,
+            RIGHT: 2,
           }}
           minDistance={3}
           maxDistance={45}

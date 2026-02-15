@@ -22,6 +22,10 @@ interface DeploymentLog {
 }
 
 interface DeploymentInferResponse {
+  deployment_id?: string
+  job_id?: string
+  input_shape?: number[]
+  output_shape?: number[]
   predictions?: number[]
   probabilities?: number[][]
   logits?: number[][]
@@ -67,7 +71,7 @@ export default function DeploymentsPage() {
   const [message, setMessage] = useState('Loading deployments...')
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [isLoadingSelected, setIsLoadingSelected] = useState(false)
-  const [inferResult, setInferResult] = useState('No endpoint inference run yet.')
+  const [inferResult, setInferResult] = useState<DeploymentInferResponse | null>(null)
 
   const activeCount = useMemo(
     () => deployments.filter((deployment) => deployment.status === 'running').length,
@@ -206,7 +210,7 @@ export default function DeploymentsPage() {
           return_probabilities: true,
         }),
       })
-      setInferResult(JSON.stringify(response, null, 2))
+      setInferResult(response)
       await fetchSelected(selectedId)
       setMessage('Endpoint inference request completed.')
     })
@@ -361,7 +365,13 @@ export default function DeploymentsPage() {
 
                   <div className="deployments-block">
                     <h3>Last Inference Result</h3>
-                    <pre className="deployments-infer">{inferResult}</pre>
+                    <div className="deployments-infer">
+                      {inferResult ? (
+                        <FormattedInferenceResult result={inferResult} />
+                      ) : (
+                        <p className="deployments-empty">No endpoint inference run yet.</p>
+                      )}
+                    </div>
                   </div>
                 </>
               ) : (
@@ -399,4 +409,80 @@ function getDeploymentDisplayName(deployment: DeploymentInfo | null): string {
 
 function createZeroMnistSample(): number[][] {
   return Array.from({ length: 28 }, () => Array.from({ length: 28 }, () => 0))
+}
+
+function FormattedInferenceResult({ result }: { result: DeploymentInferResponse }) {
+  const predictionCount = result.predictions?.length ?? 0
+  const topPrediction = predictionCount > 0 ? result.predictions?.[0] : null
+  const firstProbabilities = result.probabilities?.[0] ?? []
+  const topConfidence =
+    firstProbabilities.length > 0 ? Math.max(...firstProbabilities) : null
+
+  const probabilityRows = firstProbabilities
+    .map((value, index) => ({ index, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 10)
+
+  return (
+    <div className="deployments-infer-content">
+      <div className="deployments-infer-summary">
+        <div>
+          <span>Top Prediction</span>
+          <strong>{topPrediction !== null && topPrediction !== undefined ? topPrediction : 'N/A'}</strong>
+        </div>
+        <div>
+          <span>Top Confidence</span>
+          <strong>{topConfidence !== null ? `${(topConfidence * 100).toFixed(2)}%` : 'N/A'}</strong>
+        </div>
+        <div>
+          <span>Predictions</span>
+          <strong>{predictionCount}</strong>
+        </div>
+        <div>
+          <span>Input Shape</span>
+          <strong>{formatShape(result.input_shape)}</strong>
+        </div>
+        <div>
+          <span>Output Shape</span>
+          <strong>{formatShape(result.output_shape)}</strong>
+        </div>
+      </div>
+
+      {result.predictions && result.predictions.length > 0 ? (
+        <div className="deployments-infer-pills">
+          {result.predictions.map((prediction, index) => (
+            <span key={`prediction-${index}`} className="deployments-infer-pill">
+              sample {index + 1}: {prediction}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {probabilityRows.length > 0 ? (
+        <div className="deployments-probability-list">
+          {probabilityRows.map((row) => (
+            <div key={`prob-${row.index}`} className="deployments-probability-row">
+              <span className="deployments-probability-label">Class {row.index}</span>
+              <div className="deployments-probability-track">
+                <div
+                  className="deployments-probability-fill"
+                  style={{ width: `${(row.value * 100).toFixed(2)}%` }}
+                />
+              </div>
+              <span className="deployments-probability-value">{(row.value * 100).toFixed(2)}%</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function formatShape(shape: number[] | undefined): string {
+  if (!shape || shape.length === 0) return 'N/A'
+  const compact = [...shape]
+  while (compact.length > 2 && compact[0] === 1) {
+    compact.shift()
+  }
+  return compact.join(' × ')
 }

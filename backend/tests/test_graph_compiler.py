@@ -28,3 +28,33 @@ def test_compile_graph_softmax_warning_for_cross_entropy() -> None:
 
     compiled = compile_graph(graph, training)
     assert any("softmax suppressed" in warning.lower() for warning in compiled.warnings)
+
+
+def test_compile_graph_supports_conv2d_and_maxpool2d() -> None:
+    payload = {
+        "nodes": [
+            {"id": "in", "type": "Input", "config": {"shape": [3, 32, 32]}},
+            {"id": "conv", "type": "Conv2D", "config": {"filters": 16, "kernel_size": 3, "stride": 1, "padding": 1, "activation": "relu"}},
+            {"id": "pool", "type": "MaxPool2D", "config": {"kernel_size": 2, "stride": 2}},
+            {"id": "flat", "type": "Flatten", "config": {}},
+            {"id": "dense", "type": "Dense", "config": {"units": 32, "activation": "relu"}},
+            {"id": "out", "type": "Output", "config": {"num_classes": 2, "activation": "softmax"}},
+        ],
+        "edges": [
+            {"id": "e1", "source": "in", "target": "conv"},
+            {"id": "e2", "source": "conv", "target": "pool"},
+            {"id": "e3", "source": "pool", "target": "flat"},
+            {"id": "e4", "source": "flat", "target": "dense"},
+            {"id": "e5", "source": "dense", "target": "out"},
+        ],
+    }
+    graph = GraphSpec.model_validate(payload)
+    training = TrainingConfig(dataset="cats_vs_dogs")
+
+    compiled = compile_graph(graph, training)
+    assert "nn.Conv2d(" in compiled.python_source
+    assert "nn.MaxPool2d(" in compiled.python_source
+
+    x = torch.randn(2, 3, 32, 32)
+    y = compiled.model(x)
+    assert list(y.shape) == [2, 2]

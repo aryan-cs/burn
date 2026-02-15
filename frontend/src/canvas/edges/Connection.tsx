@@ -5,7 +5,6 @@ import type { TrainingFlowPhase } from '../nodes/LayerNode'
 import {
   LAYER_NODE_SPACING,
   LAYER_NODE_Z_OFFSET,
-  buildLayerWorldNodePositions,
   getLayerGridSize,
 } from '../../utils/layerLayout'
 import { WeightVisual } from './WeightVisual'
@@ -46,24 +45,7 @@ export function Connection({
       return buildLowDetailSegments(sourceNode, targetNode)
     }
 
-    const sourcePoints = buildLayerWorldNodePositions(sourceNode)
-    const targetPoints = buildLayerWorldNodePositions(targetNode)
-    const totalSegments = sourcePoints.length * targetPoints.length
-    const stride =
-      totalSegments > MAX_SEGMENTS_FULL_DETAIL
-        ? Math.ceil(Math.sqrt(totalSegments / MAX_SEGMENTS_FULL_DETAIL))
-        : 1
-    const values: number[] = []
-
-    for (let sourceIndex = 0; sourceIndex < sourcePoints.length; sourceIndex += stride) {
-      const source = sourcePoints[sourceIndex]
-      for (let targetIndex = 0; targetIndex < targetPoints.length; targetIndex += stride) {
-        const target = targetPoints[targetIndex]
-        pushSegment(values, source, target)
-      }
-    }
-
-    return new Float32Array(values)
+    return buildSampledSegments(sourceNode, targetNode, MAX_SEGMENTS_FULL_DETAIL)
   }, [sourceNode, targetNode, lowDetailMode])
   const lineColor = useMemo(
     () => getEdgeColor(trainingFlow?.value ?? 0),
@@ -143,6 +125,70 @@ function buildLowDetailSegments(sourceNode: LayerNode, targetNode: LayerNode): F
   return new Float32Array(values)
 }
 
+function buildSampledSegments(
+  sourceNode: LayerNode,
+  targetNode: LayerNode,
+  maxSegments: number
+): Float32Array {
+  const sourceGrid = getLayerGridSize(sourceNode.config, sourceNode.type)
+  const targetGrid = getLayerGridSize(targetNode.config, targetNode.type)
+  const sourceCount = Math.max(1, sourceGrid.rows * sourceGrid.cols)
+  const targetCount = Math.max(1, targetGrid.rows * targetGrid.cols)
+  const totalSegments = sourceCount * targetCount
+
+  let sourceSamples = sourceCount
+  let targetSamples = targetCount
+  if (totalSegments > maxSegments) {
+    sourceSamples = Math.max(
+      1,
+      Math.floor(Math.sqrt((maxSegments * sourceCount) / Math.max(1, targetCount)))
+    )
+    targetSamples = Math.max(1, Math.floor(maxSegments / Math.max(1, sourceSamples)))
+    sourceSamples = Math.min(sourceSamples, sourceCount)
+    targetSamples = Math.min(targetSamples, targetCount)
+
+    while (sourceSamples * targetSamples > maxSegments) {
+      if (targetSamples > sourceSamples && targetSamples > 1) {
+        targetSamples -= 1
+        continue
+      }
+      if (sourceSamples > 1) {
+        sourceSamples -= 1
+        continue
+      }
+      if (targetSamples > 1) {
+        targetSamples -= 1
+        continue
+      }
+      break
+    }
+  }
+
+  const sourceIndices = buildEvenFlatIndices(sourceCount, sourceSamples)
+  const targetIndices = buildEvenFlatIndices(targetCount, targetSamples)
+  const values: number[] = []
+
+  sourceIndices.forEach((sourceIndex) => {
+    const source = pointAtFlatIndex(
+      sourceNode,
+      sourceGrid.rows,
+      sourceGrid.cols,
+      sourceIndex
+    )
+    targetIndices.forEach((targetIndex) => {
+      const target = pointAtFlatIndex(
+        targetNode,
+        targetGrid.rows,
+        targetGrid.cols,
+        targetIndex
+      )
+      pushSegment(values, source, target)
+    })
+  })
+
+  return new Float32Array(values)
+}
+
 function pointAtRatio(
   node: LayerNode,
   rows: number,
@@ -168,6 +214,44 @@ function pointAtGridIndex(
   const y = node.position[1] + ((rows - 1) / 2 - rowIndex) * LAYER_NODE_SPACING
   const z = node.position[2] + LAYER_NODE_Z_OFFSET
   return [x, y, z]
+}
+
+function pointAtFlatIndex(
+  node: LayerNode,
+  rows: number,
+  cols: number,
+  flatIndex: number
+): [number, number, number] {
+  const safeRows = Math.max(1, rows)
+  const safeCols = Math.max(1, cols)
+  const clampedFlat = Math.min(Math.max(flatIndex, 0), safeRows * safeCols - 1)
+  const rowIndex = Math.floor(clampedFlat / safeCols)
+  const colIndex = clampedFlat % safeCols
+  return pointAtGridIndex(node, safeRows, safeCols, rowIndex, colIndex)
+}
+
+function buildEvenFlatIndices(totalCount: number, sampleCount: number): number[] {
+  const safeTotal = Math.max(1, totalCount)
+  const safeSample = Math.max(1, Math.min(sampleCount, safeTotal))
+  if (safeSample === safeTotal) {
+    return Array.from({ length: safeTotal }, (_, index) => index)
+  }
+  if (safeSample === 1) {
+    return [Math.floor((safeTotal - 1) / 2)]
+  }
+
+  const indices: number[] = []
+  const seen = new Set<number>()
+  for (let index = 0; index < safeSample; index += 1) {
+    const ratio = index / (safeSample - 1)
+    const flat = Math.round(ratio * (safeTotal - 1))
+    if (seen.has(flat)) continue
+    seen.add(flat)
+    indices.push(flat)
+  }
+
+  if (indices.length === 0) return [0]
+  return indices
 }
 
 function clamp01(value: number): number {

@@ -9,6 +9,8 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 class LayerType(str, Enum):
     INPUT = "Input"
     DENSE = "Dense"
+    CONV2D = "Conv2D"
+    MAXPOOL2D = "MaxPool2D"
     DROPOUT = "Dropout"
     FLATTEN = "Flatten"
     OUTPUT = "Output"

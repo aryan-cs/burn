@@ -5,6 +5,7 @@ import io
 import math
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 import modal
@@ -23,6 +24,9 @@ PROGRESS_DICT_NAME = "burn-training-progress"
 progress_store = modal.Dict.from_name(PROGRESS_DICT_NAME, create_if_missing=True)
 DEPLOYMENT_DICT_NAME = "burn-modal-deployments"
 deployment_store = modal.Dict.from_name(DEPLOYMENT_DICT_NAME, create_if_missing=True)
+DEPLOYMENT_VOLUME_NAME = os.getenv("MODAL_DEPLOYMENT_VOLUME_NAME", "burn-modal-deployments-volume")
+DEPLOYMENT_VOLUME_MOUNT = os.getenv("MODAL_DEPLOYMENT_VOLUME_MOUNT", "/modal-deployments")
+deployment_volume = modal.Volume.from_name(DEPLOYMENT_VOLUME_NAME, create_if_missing=True)
 image = modal.Image.debian_slim().pip_install(
     "fastapi[standard]>=0.115.0",
     "kaggle>=2.0.0",
@@ -93,6 +97,13 @@ def _publish_progress(job_id: str | None, payload: dict[str, Any]) -> None:
     progress_store[job_id] = payload
 
 
+def _deployment_model_path(deployment_id: str) -> Path:
+    safe_id = "".join(ch for ch in deployment_id if ch.isalnum() or ch in {"-", "_"})
+    if not safe_id:
+        raise ValueError("Invalid deployment_id")
+    return Path(DEPLOYMENT_VOLUME_MOUNT) / "models" / f"{safe_id}.pt"
+
+
 def _to_inference_tensor(raw_inputs: Any, expected_shape: list[int] | None) -> torch.Tensor:
     tensor = torch.tensor(raw_inputs, dtype=torch.float32)
     if tensor.ndim == 0:
@@ -104,15 +115,22 @@ def _to_inference_tensor(raw_inputs: Any, expected_shape: list[int] | None) -> t
 
     expected_rank = len(expected_shape)
     expected_elems = math.prod(expected_shape)
-    # Accept a common shorthand for single-channel images:
-    # [H, W] -> [1, H, W] before adding batch.
-    if (
-        expected_rank >= 2
-        and expected_shape[0] == 1
-        and tensor.ndim == expected_rank - 1
-        and list(tensor.shape) == expected_shape[1:]
-    ):
+    expected_channels = int(expected_shape[0]) if expected_rank >= 3 else None
+    # Accept shorthand image payloads:
+    # [H, W] -> [C, H, W] (repeat channel if needed) before adding batch.
+    if expected_rank == 3 and tensor.ndim == 2 and list(tensor.shape) == expected_shape[1:]:
         tensor = tensor.unsqueeze(0)
+        if expected_channels and expected_channels > 1:
+            tensor = tensor.repeat(expected_channels, 1, 1)
+    if (
+        expected_rank == 3
+        and tensor.ndim == 3
+        and tensor.shape[0] == 1
+        and expected_channels
+        and expected_channels > 1
+        and list(tensor.shape[1:]) == expected_shape[1:]
+    ):
+        tensor = tensor.repeat(expected_channels, 1, 1)
     if tensor.ndim == expected_rank:
         return tensor.unsqueeze(0)
     if tensor.ndim == expected_rank + 1:
@@ -134,18 +152,32 @@ def _load_deployed_model(deployment_id: str):
     graph_payload = payload.get("graph_payload")
     training_payload = payload.get("training_payload")
     state_dict_b64 = payload.get("state_dict_b64")
+    model_path = payload.get("model_path")
     input_shape = payload.get("input_shape")
     if not isinstance(graph_payload, dict):
         raise ValueError("Invalid deployment graph payload")
     if not isinstance(training_payload, dict):
         raise ValueError("Invalid deployment training payload")
-    if not isinstance(state_dict_b64, str):
-        raise ValueError("Invalid deployment model payload")
 
     graph = GraphSpec.model_validate(graph_payload)
     training = normalize_training_config(training_payload)
     compiled = compile_graph(graph, training)
-    state_dict = torch.load(io.BytesIO(base64.b64decode(state_dict_b64.encode("ascii"))), map_location="cpu")
+    if isinstance(model_path, str) and model_path.strip():
+        try:
+            deployment_volume.reload()
+        except Exception:
+            # No-op if the mounted view is already current for this worker.
+            pass
+        state_path = Path(model_path)
+        if not state_path.is_absolute():
+            state_path = Path(DEPLOYMENT_VOLUME_MOUNT) / state_path
+        if not state_path.exists():
+            raise ValueError(f"Missing deployment model artifact at {state_path}")
+        state_dict = torch.load(state_path, map_location="cpu")
+    else:
+        if not isinstance(state_dict_b64, str):
+            raise ValueError("Invalid deployment model payload")
+        state_dict = torch.load(io.BytesIO(base64.b64decode(state_dict_b64.encode("ascii"))), map_location="cpu")
     inner_state_dict = {
         (k[len("_orig_mod.") :] if isinstance(k, str) and k.startswith("_orig_mod.") else k): v
         for k, v in state_dict.items()
@@ -235,6 +267,8 @@ def train_job_remote(
     max_train_batches = max(0, int(os.getenv("MODAL_MAX_TRAIN_BATCHES", "0")))
     max_test_batches = max(0, int(os.getenv("MODAL_MAX_TEST_BATCHES", "0")))
     batch_multiplier = max(1, int(os.getenv("MODAL_BATCH_SIZE_MULTIPLIER", "1")))
+    progress_every_batches = max(1, int(os.getenv("MODAL_PROGRESS_EVERY_BATCHES", "20")))
+    max_progress_points = max(128, int(os.getenv("MODAL_MAX_PROGRESS_POINTS", "512")))
     effective_batch_size = int(training.batch_size) * batch_multiplier
     if use_compile:
         try:
@@ -269,6 +303,7 @@ def train_job_remote(
         correct = 0
         total = 0
         steps = 0
+        total_train_steps = max(1, len(train_loader))
 
         for batch_x, batch_y in train_loader:
             batch_x = batch_x.to(device)
@@ -291,6 +326,36 @@ def train_job_remote(
             correct += int((output.argmax(1) == batch_y).sum().item())
             total += int(batch_y.size(0))
             steps += 1
+
+            if steps % progress_every_batches == 0:
+                interim_train_loss = running_loss / max(steps, 1)
+                interim_train_accuracy = correct / max(total, 1)
+                interim_test_loss = last_test_loss if last_test_loss > 0 else interim_train_loss
+                interim_test_accuracy = (
+                    last_test_accuracy if last_test_accuracy > 0 else interim_train_accuracy
+                )
+                interim_epoch = float(epoch + min(0.999, steps / total_train_steps))
+                metrics.append(
+                    {
+                        "epoch": interim_epoch,
+                        "train_loss": interim_train_loss,
+                        "train_accuracy": interim_train_accuracy,
+                        "test_loss": interim_test_loss,
+                        "test_accuracy": interim_test_accuracy,
+                    }
+                )
+                if len(metrics) > max_progress_points:
+                    del metrics[:-max_progress_points]
+                _publish_progress(
+                    job_id,
+                    {
+                        "status": "running",
+                        "epoch_metrics": metrics,
+                        "final_metrics": None,
+                        "error": None,
+                    },
+                )
+
             if max_train_batches > 0 and steps >= max_train_batches:
                 break
 
@@ -319,6 +384,8 @@ def train_job_remote(
                 "test_accuracy": last_test_accuracy,
             }
         )
+        if len(metrics) > max_progress_points:
+            del metrics[:-max_progress_points]
         print(
             (
                 f"[modal][train_job_remote] epoch={epoch + 1}/{training.epochs} "
@@ -377,7 +444,11 @@ def train_job_remote(
     }
 
 
-@app.function(image=image, timeout=60 * 5)
+@app.function(
+    image=image,
+    timeout=60 * 5,
+    volumes={DEPLOYMENT_VOLUME_MOUNT: deployment_volume},
+)
 def register_deployment_remote(
     deployment_id: str,
     graph_payload: dict[str, Any],
@@ -387,25 +458,52 @@ def register_deployment_remote(
 ) -> dict[str, Any]:
     if not deployment_id:
         raise ValueError("deployment_id is required")
+    state_path = _deployment_model_path(deployment_id)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        state_path.write_bytes(base64.b64decode(state_dict_b64.encode("ascii")))
+    except Exception as exc:
+        raise ValueError(f"Failed to persist deployment weights: {exc}") from exc
+    deployment_volume.commit()
     deployment_store[deployment_id] = {
         "graph_payload": graph_payload,
         "training_payload": training_payload,
-        "state_dict_b64": state_dict_b64,
+        "model_path": str(state_path),
         "input_shape": input_shape,
     }
     return {"deployment_id": deployment_id, "status": "ready"}
 
 
-@app.function(image=image, timeout=60)
+@app.function(
+    image=image,
+    timeout=60,
+    volumes={DEPLOYMENT_VOLUME_MOUNT: deployment_volume},
+)
 def unregister_deployment_remote(deployment_id: str) -> dict[str, Any]:
+    payload = deployment_store.get(deployment_id)
+    state_path: Path | None = None
+    if isinstance(payload, dict):
+        raw_path = payload.get("model_path")
+        if isinstance(raw_path, str) and raw_path.strip():
+            state_path = Path(raw_path)
     try:
         del deployment_store[deployment_id]
     except KeyError:
         pass
+    try:
+        candidate = state_path if state_path is not None else _deployment_model_path(deployment_id)
+        candidate.unlink(missing_ok=True)
+        deployment_volume.commit()
+    except Exception:
+        pass
     return {"deployment_id": deployment_id, "status": "deleted"}
 
 
-@app.function(image=image, timeout=60)
+@app.function(
+    image=image,
+    timeout=60,
+    volumes={DEPLOYMENT_VOLUME_MOUNT: deployment_volume},
+)
 @modal.fastapi_endpoint(method="POST")
 def infer_deployment_remote(payload: dict[str, Any]) -> dict[str, Any]:
     deployment_id = str(payload.get("deployment_id", "")).strip()

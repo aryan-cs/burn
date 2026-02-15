@@ -102,6 +102,15 @@ const PRESET_CARDS: LaunchCard[] = [
     tone: 'nn',
   },
   {
+    title: 'AlexNet Cats vs Dogs',
+    subtitle: 'Preset Project',
+    description:
+      'True AlexNet stack (conv/pool/fc) trained on Kaggle Cats vs Dogs at 96x96.',
+    href: '/nn?mode=preset&template=alexnet_cats_dogs',
+    badge: NN,
+    tone: 'nn',
+  },
+  {
     title: 'Iris RF Classifier',
     subtitle: 'Preset Project',
     description: 'Classic low-dimensional classification with RandomForestClassifier.',

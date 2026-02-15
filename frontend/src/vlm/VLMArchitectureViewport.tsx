@@ -1,5 +1,5 @@
 import { Canvas } from '@react-three/fiber'
-import { Line, OrbitControls, Text } from '@react-three/drei'
+import { Line, OrbitControls } from '@react-three/drei'
 import { useEffect, useMemo, useState } from 'react'
 import * as THREE from 'three'
 import { WeightVisual } from '../canvas/edges/WeightVisual'
@@ -10,7 +10,7 @@ import type {
 } from './architecture'
 
 type Vec3 = [number, number, number]
-type NodeKind = 'token'
+type NodeKind = 'token' | 'stage'
 
 interface VLMArchitectureViewportProps {
   architecture: VLMArchitectureSpec
@@ -36,7 +36,7 @@ interface VisualEdge {
   weight: number
   sourceStageId: string
   targetStageId: string
-  kind: 'attention' | 'token_chain'
+  kind: 'attention' | 'token_chain' | 'stage_flow'
 }
 
 interface CnnMatrixPanel {
@@ -54,6 +54,7 @@ interface CnnMatrixPanel {
   position: Vec3
   width: number
   height: number
+  depth: number
 }
 
 interface CnnConvolutionOp {
@@ -90,17 +91,26 @@ interface StageRoles {
 interface AttentionState {
   edges: VisualEdge[]
   activeTokenIds: Set<string>
+  activationById: Map<string, number>
+}
+
+interface StageFlowGraph {
+  nodes: VisualNode[]
+  edges: VisualEdge[]
+}
+
+interface TransformerRailGraph {
+  leftTokens: VisualNode[]
+  rightTokens: VisualNode[]
+  railEdges: VisualEdge[]
+  alignmentEdges: VisualEdge[]
 }
 
 const IGNORE_RAYCAST: THREE.Mesh['raycast'] = () => undefined
 
-const TOKEN_CENTER_X = 7.35
-const TOKEN_CENTER_Z = 0
-const CNN_X_START = -11.5
-const CNN_X_END = 1.2
-
-const MATRIX_CELL_SIZE = 0.145
-const MATRIX_PADDING = 0.16
+const TRANSFORMER_LEFT_X = 4.9
+const TRANSFORMER_RIGHT_X = 9.8
+const TRANSFORMER_TOP_Y = 2.55
 const MAX_MATRIX_CELLS_HIGH = 144
 const MAX_MATRIX_CELLS_LOW = 81
 
@@ -163,63 +173,97 @@ export function VLMArchitectureViewport({
     ? (cnnPanelLookup.get(focusedConvOp.targetPanelId) ?? null)
     : null
 
-  const showTransformer = selectedStageId === null
-    ? true
-    : selectedStageId === roles.transformer || selectedStageId === roles.head
+  const showTransformer = false
 
   const totalTokens = Math.max(1, architecture.blueprint.transformer.token_count)
   const renderedTokenCount = showTransformer
-    ? (lowDetailMode ? Math.min(180, totalTokens) : Math.min(340, totalTokens))
+    ? (lowDetailMode ? Math.min(22, totalTokens) : Math.min(36, totalTokens))
     : 0
-  const tokens = useMemo(
-    () => createTokens(roles.transformer, renderedTokenCount),
-    [roles.transformer, renderedTokenCount]
-  )
-  const tokenChainEdges = useMemo(
-    () => createTokenChainEdges(tokens, lowDetailMode),
-    [tokens, lowDetailMode]
+  const transformerRailGraph = useMemo(
+    () => createTransformerRailGraph(roles.transformer, renderedTokenCount, lowDetailMode),
+    [roles.transformer, renderedTokenCount, lowDetailMode]
   )
 
   const [attentionStep, setAttentionStep] = useState(0)
   useEffect(() => {
     setAttentionStep(0)
-  }, [tokens.length, architecture.id])
+  }, [transformerRailGraph.leftTokens.length, architecture.id])
   useEffect(() => {
-    if (tokens.length === 0) return
+    if (transformerRailGraph.leftTokens.length === 0) return
     const timer = window.setInterval(
       () => setAttentionStep((current) => (current + 1) % 100000),
       lowDetailMode ? 320 : 190
     )
     return () => window.clearInterval(timer)
-  }, [tokens.length, lowDetailMode])
+  }, [transformerRailGraph.leftTokens.length, lowDetailMode])
 
   const attentionState = useMemo(
-    () => createAttentionState(tokens, architecture, attentionStep, lowDetailMode),
-    [tokens, architecture, attentionStep, lowDetailMode]
+    () =>
+      createAttentionState(
+        transformerRailGraph.leftTokens,
+        transformerRailGraph.rightTokens,
+        architecture,
+        attentionStep,
+        lowDetailMode
+      ),
+    [transformerRailGraph.leftTokens, transformerRailGraph.rightTokens, architecture, attentionStep, lowDetailMode]
   )
   const attentionEdges = attentionState.edges
   const activeTokenIds = attentionState.activeTokenIds
+  const tokenActivationById = attentionState.activationById
 
-  const chainEdgeSplit = useMemo(
-    () => splitEdgesBySelection(tokenChainEdges, selectedStageId),
-    [tokenChainEdges, selectedStageId]
+  const railEdgeSplit = useMemo(
+    () => splitEdgesBySelection(transformerRailGraph.railEdges, selectedStageId),
+    [transformerRailGraph.railEdges, selectedStageId]
+  )
+  const alignmentEdgeSplit = useMemo(
+    () => splitEdgesBySelection(transformerRailGraph.alignmentEdges, selectedStageId),
+    [transformerRailGraph.alignmentEdges, selectedStageId]
   )
   const attentionEdgeSplit = useMemo(
     () => splitEdgesBySelection(attentionEdges, selectedStageId),
     [attentionEdges, selectedStageId]
   )
+  const stageFlowGraph = useMemo(
+    () => createStageFlowGraph(architecture, lowDetailMode),
+    [architecture, lowDetailMode]
+  )
+  const stageFlowEdgeSplit = useMemo(
+    () => splitEdgesBySelection(stageFlowGraph.edges, selectedStageId),
+    [stageFlowGraph.edges, selectedStageId]
+  )
+  const activeStageIds = useMemo(() => {
+    const ids = new Set<string>()
+    if (selectedStageId) {
+      ids.add(selectedStageId)
+    }
+    if (focusedConvOp) {
+      ids.add(focusedConvOp.stageId)
+    }
+    if (focusedSourcePanel) {
+      ids.add(focusedSourcePanel.stageId)
+    }
+    if (focusedTargetPanel) {
+      ids.add(focusedTargetPanel.stageId)
+    }
+    if (showTransformer) {
+      ids.add(roles.transformer)
+      ids.add(roles.head)
+    }
+    return ids
+  }, [focusedConvOp, focusedSourcePanel, focusedTargetPanel, roles.head, roles.transformer, selectedStageId, showTransformer])
 
-  const chainDefaultOpacity = 0.22
-  const chainSelectedOpacity = clampOpacity(0.42 + activityPulse * 0.06)
+  const railDefaultOpacity = 0.2
+  const railSelectedOpacity = clampOpacity(0.38 + activityPulse * 0.05)
+  const alignmentDefaultOpacity = 0.18
+  const alignmentSelectedOpacity = clampOpacity(0.34 + activityPulse * 0.06)
   const attentionDefaultOpacity = clampOpacity(0.44 + activityPulse * 0.08)
   const attentionSelectedOpacity = clampOpacity(0.62 + activityPulse * 0.14)
 
-  const tokenSuffix =
-    !showTransformer
-      ? ' (hidden in CNN focus mode)'
-      : lowDetailMode && renderedTokenCount < totalTokens
-        ? ` (showing ${renderedTokenCount.toLocaleString()})`
-      : ''
+  const attentionPulseEdges = useMemo(() => {
+    const ranked = [...attentionEdges].sort((a, b) => b.weight - a.weight)
+    return ranked.slice(0, lowDetailMode ? 3 : 6)
+  }, [attentionEdges, lowDetailMode])
 
   return (
     <div className="vlm-viewport-root">
@@ -230,125 +274,133 @@ export function VLMArchitectureViewport({
         <pointLight position={[-10, -10, -5]} intensity={0.25} color="#9a9a9a" />
         <gridHelper args={[46, 92, '#2b2b2b', '#202020']} />
 
-        <Text
-          position={[-5.8, 3.34, 0]}
-          fontSize={0.34}
-          color="#e0f0ff"
-          anchorX="center"
-          anchorY="middle"
-        >
-          CNN Matrix Convolution
-        </Text>
-        <Text
-          position={[-5.8, 2.88, 0]}
-          fontSize={0.18}
-          color="#98b5d4"
-          anchorX="center"
-          anchorY="middle"
-        >
-          input map × kernel matrix = output map (sliding window)
-        </Text>
-        <Text
-          position={[-5.8, 2.54, 0]}
-          fontSize={0.14}
-          color="#7ea8cf"
-          anchorX="center"
-          anchorY="middle"
-        >
-          each square = one value, stacked sheets = channels, moving box = receptive field
-        </Text>
+        <CnnPipelineChainScene
+          panels={cnnPipeline.panels}
+          ops={cnnPipeline.ops}
+          panelHighlights={panelHighlights}
+          selectedStageId={selectedStageId}
+          activePairIndex={focusedConvOpIndex}
+          activeStageIds={activeStageIds}
+          lowDetailMode={lowDetailMode}
+          activityPulse={activityPulse}
+          onSelectStage={onSelectStage}
+        />
 
-        <Text
-          position={[7.4, 3.34, 0]}
-          fontSize={0.34}
-          color="#e0f0ff"
-          anchorX="center"
-          anchorY="middle"
-        >
-          Transformer Attention
-        </Text>
-        <Text
-          position={[7.4, 2.88, 0]}
-          fontSize={0.18}
-          color="#98b5d4"
-          anchorX="center"
-          anchorY="middle"
-        >
-          {`tokens: ${totalTokens.toLocaleString()}${tokenSuffix}`}
-        </Text>
-
-        {focusedConvOp && focusedSourcePanel && focusedTargetPanel ? (
-          <CnnSymbolicScene
-            op={focusedConvOp}
-            sourcePanel={focusedSourcePanel}
-            targetPanel={focusedTargetPanel}
-            sourceHighlight={panelHighlights.get(focusedSourcePanel.id) ?? null}
-            targetHighlight={panelHighlights.get(focusedTargetPanel.id) ?? null}
-            selectedStageId={selectedStageId}
-            stageIndex={focusedConvOpIndex + 1}
-            totalStages={cnnPipeline.ops.length}
-            lowDetailMode={lowDetailMode}
-            activityPulse={activityPulse}
-            onSelectStage={onSelectStage}
-          />
-        ) : (
-          <Text
-            position={[-5.8, 0, 0]}
-            fontSize={0.22}
-            color="#9db6d3"
-            anchorX="center"
-            anchorY="middle"
-          >
-            No CNN stages in architecture.
-          </Text>
-        )}
-
-        {showTransformer ? (
+        {false ? (
           <>
             <EdgeSegments
-              edges={chainEdgeSplit.rest}
-              color="#4f5968"
-              opacity={chainDefaultOpacity}
+              edges={stageFlowEdgeSplit.rest}
+              color="#3f454f"
+              opacity={0.24}
             />
             <EdgeSegments
-              edges={chainEdgeSplit.selected}
-              color="#80a4d8"
-              opacity={chainSelectedOpacity}
-            />
-            <EdgeSegments
-              edges={attentionEdgeSplit.rest}
+              edges={stageFlowEdgeSplit.selected}
               color="#ffb429"
-              opacity={attentionDefaultOpacity}
+              opacity={clampOpacity(0.52 + activityPulse * 0.1)}
             />
-            <EdgeSegments
-              edges={attentionEdgeSplit.selected}
-              color="#ffd37a"
-              opacity={attentionSelectedOpacity}
-            />
-
-            {tokens.map((node) => (
+            {stageFlowGraph.nodes.map((node) => (
               <TokenNode
                 key={node.id}
                 node={node}
                 selected={selectedStageId === node.stageId}
-                active={activeTokenIds.has(node.id)}
+                active={activeStageIds.has(node.stageId)}
+                activation={activeStageIds.has(node.stageId) ? 1 : 0}
                 lowDetailMode={lowDetailMode}
-                outlineColor={stageColorMap.get(node.stageId) ?? '#ffd37a'}
+                outlineColor={stageColorMap.get(node.stageId) ?? '#ffb429'}
                 onSelectStage={onSelectStage}
               />
             ))}
           </>
-        ) : (
-          <Text
-            position={[7.4, -0.2, 0]}
-            fontSize={0.16}
-            color="#7f95ad"
-            anchorX="center"
-            anchorY="middle"
-          >
-            Transformer view hidden. Click a transformer stage to inspect attention.
-          </Text>
-        )}
+        ) : null}
+
+        {false && focusedConvOp && focusedSourcePanel && focusedTargetPanel ? (
+          <CnnSymbolicScene
+            op={focusedConvOp as CnnConvolutionOp}
+            sourcePanel={focusedSourcePanel as CnnMatrixPanel}
+            targetPanel={focusedTargetPanel as CnnMatrixPanel}
+            sourceHighlight={panelHighlights.get((focusedSourcePanel as CnnMatrixPanel).id) ?? null}
+            targetHighlight={panelHighlights.get((focusedTargetPanel as CnnMatrixPanel).id) ?? null}
+            selectedStageId={selectedStageId}
+            lowDetailMode={lowDetailMode}
+            activityPulse={activityPulse}
+            onSelectStage={onSelectStage}
+          />
+        ) : null}
+
+        {showTransformer ? (
+          <>
+            <TransformerHeadStrip
+              count={Math.max(2, lowDetailMode ? Math.min(6, architecture.blueprint.transformer.attention_heads) : Math.min(10, architecture.blueprint.transformer.attention_heads + 2))}
+              lowDetailMode={lowDetailMode}
+            />
+            <EdgeSegments
+              edges={railEdgeSplit.rest}
+              color="#48525d"
+              opacity={railDefaultOpacity}
+            />
+            <EdgeSegments
+              edges={railEdgeSplit.selected}
+              color="#8aa2bc"
+              opacity={railSelectedOpacity}
+            />
+            <EdgeSegments
+              edges={alignmentEdgeSplit.rest}
+              color="#56616c"
+              opacity={alignmentDefaultOpacity}
+            />
+            <EdgeSegments
+              edges={alignmentEdgeSplit.selected}
+              color="#b3c2d1"
+              opacity={alignmentSelectedOpacity}
+            />
+            <WeightedEdgeSegments
+              edges={attentionEdgeSplit.rest}
+              lowColor="#2e343a"
+              highColor="#ffb429"
+              opacity={attentionDefaultOpacity}
+            />
+            <WeightedEdgeSegments
+              edges={attentionEdgeSplit.selected}
+              lowColor="#7e98b3"
+              highColor="#ffd37a"
+              opacity={attentionSelectedOpacity}
+            />
+
+            {[...transformerRailGraph.leftTokens, ...transformerRailGraph.rightTokens].map((node) => {
+              const activation = tokenActivationById.get(node.id) ?? 0
+              return (
+                <TokenNode
+                  key={node.id}
+                  node={node}
+                  selected={selectedStageId === node.stageId}
+                  active={activeTokenIds.has(node.id)}
+                  activation={activation}
+                  lowDetailMode={lowDetailMode}
+                  outlineColor={stageColorMap.get(node.stageId) ?? '#ffd37a'}
+                  onSelectStage={onSelectStage}
+                />
+              )
+            })}
+
+            {attentionPulseEdges.map((edge, index) => {
+              const curve = new THREE.LineCurve3(
+                new THREE.Vector3(edge.from[0], edge.from[1], edge.from[2]),
+                new THREE.Vector3(edge.to[0], edge.to[1], edge.to[2])
+              )
+              return (
+                <WeightVisual
+                  key={`att-pulse-${edge.id}`}
+                  curve={curve}
+                  speed={lowDetailMode ? 0.36 : 0.52}
+                  color="#ffe29b"
+                  size={0.045}
+                  opacity={0.86}
+                  offset={index * 0.12}
+                />
+              )
+            })}
+          </>
+        ) : null}
 
         <OrbitControls
           makeDefault
@@ -369,6 +421,347 @@ export function VLMArchitectureViewport({
   )
 }
 
+interface CnnPipelineChainSceneProps {
+  panels: CnnMatrixPanel[]
+  ops: CnnConvolutionOp[]
+  panelHighlights: Map<string, PanelHighlight>
+  selectedStageId: string | null
+  activePairIndex: number
+  activeStageIds: Set<string>
+  lowDetailMode: boolean
+  activityPulse: number
+  onSelectStage: (stageId: string) => void
+}
+
+function CnnPipelineChainScene({
+  panels,
+  ops,
+  panelHighlights,
+  selectedStageId,
+  activePairIndex,
+  activeStageIds,
+  lowDetailMode,
+  activityPulse,
+  onSelectStage,
+}: CnnPipelineChainSceneProps) {
+  const chainEdges = useMemo(() => createCnnChainEdges(panels, lowDetailMode), [panels, lowDetailMode])
+  const selectedSplit = useMemo(
+    () => splitEdgesBySelection(chainEdges, selectedStageId),
+    [chainEdges, selectedStageId]
+  )
+
+  const focusedPairIndex = useMemo(() => {
+    if (panels.length < 2) return -1
+    if (selectedStageId) {
+      const selectedPair = panels.findIndex((panel, index) => {
+        if (index >= panels.length - 1) return false
+        const next = panels[index + 1]
+        return panel.stageId === selectedStageId || next.stageId === selectedStageId
+      })
+      if (selectedPair >= 0) return selectedPair
+    }
+    if (activePairIndex >= 0 && activePairIndex < panels.length - 1) {
+      return activePairIndex
+    }
+    if (ops.length > 0) return 0
+    return -1
+  }, [activePairIndex, ops.length, panels, selectedStageId])
+
+  const activeEdges = useMemo(() => {
+    if (focusedPairIndex < 0) return []
+    return chainEdges.filter((edge) => edge.id.startsWith(`cnn-chain:${focusedPairIndex}:`))
+  }, [chainEdges, focusedPairIndex])
+
+  const pulseEdges = useMemo(
+    () => activeEdges.slice(0, lowDetailMode ? 6 : 10),
+    [activeEdges, lowDetailMode]
+  )
+
+  return (
+    <group>
+      <EdgeSegments
+        edges={selectedSplit.rest}
+        color="#343434"
+        opacity={0.19}
+      />
+      <WeightedEdgeSegments
+        edges={activeEdges}
+        lowColor="#504a45"
+        highColor="#ffb429"
+        opacity={clampOpacity(0.5 + activityPulse * 0.2)}
+      />
+      <EdgeSegments
+        edges={selectedSplit.selected}
+        color="#ffd48a"
+        opacity={clampOpacity(0.58 + activityPulse * 0.12)}
+      />
+
+      {pulseEdges.map((edge, index) => {
+        const curve = new THREE.LineCurve3(
+          new THREE.Vector3(edge.from[0], edge.from[1], edge.from[2]),
+          new THREE.Vector3(edge.to[0], edge.to[1], edge.to[2])
+        )
+        return (
+          <WeightVisual
+            key={`vlm-chain-pulse-${edge.id}`}
+            curve={curve}
+            speed={lowDetailMode ? 0.38 : 0.5}
+            color="#ffd88d"
+            size={0.048}
+            opacity={0.88}
+            offset={index * 0.1}
+          />
+        )
+      })}
+
+      {panels.map((panel) => (
+        <CnnChainPanel
+          key={panel.id}
+          panel={panel}
+          selected={selectedStageId === panel.stageId}
+          active={activeStageIds.has(panel.stageId)}
+          highlight={panelHighlights.get(panel.id) ?? null}
+          lowDetailMode={lowDetailMode}
+          activityPulse={activityPulse}
+          onSelectStage={onSelectStage}
+        />
+      ))}
+    </group>
+  )
+}
+
+interface CnnChainPanelProps {
+  panel: CnnMatrixPanel
+  selected: boolean
+  active: boolean
+  highlight: PanelHighlight | null
+  lowDetailMode: boolean
+  activityPulse: number
+  onSelectStage: (stageId: string) => void
+}
+
+function CnnChainPanel({
+  panel,
+  selected,
+  active,
+  highlight,
+  lowDetailMode,
+  activityPulse,
+  onSelectStage,
+}: CnnChainPanelProps) {
+  const [hovered, setHovered] = useState(false)
+  const isInput = panel.id === 'cnn_input_matrix'
+  const focused = selected || active || hovered
+  const outlineColor = focused ? '#ffd999' : panel.color
+  const slices = clampInt(panel.sliceCount + (isInput ? 1 : 0), 2, lowDetailMode ? 5 : 8)
+  const nodePoints = useMemo(
+    () => createPanelNodePoints(panel, lowDetailMode),
+    [panel, lowDetailMode]
+  )
+  const highlightRect = useMemo(
+    () => createPanelHighlightRect(panel, highlight),
+    [panel, highlight]
+  )
+
+  return (
+    <group position={panel.position} rotation={[0, isInput ? Math.PI * 0.5 : 0, 0]}>
+      {Array.from({ length: slices }).map((_, index) => {
+        const ratio = slices <= 1 ? 0 : index / (slices - 1)
+        const xShift = -ratio * panel.depth * 0.38
+        const zShift = -ratio * panel.depth * 0.18
+        const opacity = ratio === 0 ? 0.85 : Math.max(0.18, 0.55 - ratio * 0.42)
+        return (
+          <mesh key={`${panel.id}-stack-${index}`} position={[xShift, 0, zShift]} raycast={index === 0 ? undefined : IGNORE_RAYCAST}>
+            <boxGeometry args={[panel.width, panel.height, Math.max(0.18, panel.depth * 0.36)]} />
+            <meshStandardMaterial
+              color="#131313"
+              emissive={panel.color}
+              emissiveIntensity={ratio === 0 ? (focused ? 0.3 : 0.18) : 0.08}
+              transparent
+              opacity={opacity}
+              roughness={0.45}
+              metalness={0.08}
+            />
+          </mesh>
+        )
+      })}
+
+      {nodePoints.map((point, index) => {
+        const seeded = Math.abs(seededSigned(`chain-node:${panel.id}:${index}`))
+        const pulse = active ? 0.24 + activityPulse * 0.16 : 0.04
+        const emissiveIntensity = 0.16 + seeded * 0.38 + pulse + (selected ? 0.14 : 0)
+        return (
+          <mesh key={`${panel.id}-node-${index}`} position={point} raycast={IGNORE_RAYCAST}>
+            <sphereGeometry args={[lowDetailMode ? 0.03 : 0.038, lowDetailMode ? 8 : 10, lowDetailMode ? 8 : 10]} />
+            <meshStandardMaterial
+              color="#111111"
+              emissive={panel.color}
+              emissiveIntensity={emissiveIntensity}
+              roughness={0.32}
+              metalness={0.1}
+            />
+          </mesh>
+        )
+      })}
+
+      {highlightRect ? (
+        <mesh position={highlightRect.position} raycast={IGNORE_RAYCAST}>
+          <planeGeometry args={[highlightRect.width, highlightRect.height]} />
+          <meshBasicMaterial
+            color={highlightRect.color}
+            transparent
+            opacity={0.26}
+            side={THREE.DoubleSide}
+            depthWrite={false}
+          />
+        </mesh>
+      ) : null}
+
+      {highlightRect ? (
+        <mesh position={[highlightRect.position[0], highlightRect.position[1], highlightRect.position[2] + 0.003]} raycast={IGNORE_RAYCAST}>
+          <planeGeometry args={[highlightRect.width, highlightRect.height]} />
+          <meshBasicMaterial
+            color={highlightRect.color}
+            wireframe
+            transparent
+            opacity={0.9}
+            side={THREE.DoubleSide}
+            depthWrite={false}
+          />
+        </mesh>
+      ) : null}
+
+      <mesh raycast={IGNORE_RAYCAST}>
+        <boxGeometry args={[panel.width * 1.02, panel.height * 1.02, panel.depth * 1.02]} />
+        <meshBasicMaterial
+          color={outlineColor}
+          wireframe
+          transparent
+          opacity={focused ? 0.72 : 0.36}
+          depthWrite={false}
+        />
+      </mesh>
+
+      <mesh
+        onPointerOver={(event) => {
+          event.stopPropagation()
+          setHovered(true)
+        }}
+        onPointerOut={(event) => {
+          event.stopPropagation()
+          setHovered(false)
+        }}
+        onClick={(event) => {
+          event.stopPropagation()
+          onSelectStage(panel.stageId)
+        }}
+      >
+        <boxGeometry args={[panel.width + 0.26, panel.height + 0.26, panel.depth + 0.26]} />
+        <meshBasicMaterial transparent opacity={0} />
+      </mesh>
+    </group>
+  )
+}
+
+function createPanelNodePoints(panel: CnnMatrixPanel, lowDetailMode: boolean): Vec3[] {
+  const rows = clampInt(Math.round(Math.sqrt(panel.rows + 1)), 2, lowDetailMode ? 4 : 6)
+  const cols = clampInt(Math.round(Math.sqrt(panel.cols + 1)), 2, lowDetailMode ? 4 : 6)
+  const points: Vec3[] = []
+  const x = panel.width * 0.51
+  const ySpan = panel.height * 0.72
+  const zSpan = panel.depth * 0.64
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      const y = rows === 1 ? 0 : ySpan * (0.5 - row / (rows - 1))
+      const z = cols === 1 ? 0 : zSpan * (col / (cols - 1) - 0.5)
+      points.push([x, y, z])
+    }
+  }
+
+  return points
+}
+
+function createPanelHighlightRect(
+  panel: CnnMatrixPanel,
+  highlight: PanelHighlight | null
+): { position: Vec3; width: number; height: number; color: string } | null {
+  if (!highlight) return null
+  const safeRows = Math.max(1, panel.rows)
+  const safeCols = Math.max(1, panel.cols)
+  const cellHeight = panel.height / safeRows
+  const cellWidth = panel.depth / safeCols
+  const width = Math.max(0.04, highlight.cols * cellWidth)
+  const height = Math.max(0.04, highlight.rows * cellHeight)
+  const y = panel.height * 0.5 - (highlight.row + highlight.rows * 0.5) * cellHeight
+  const z = -panel.depth * 0.5 + (highlight.col + highlight.cols * 0.5) * cellWidth
+  return {
+    position: [panel.width * 0.512, y, z],
+    width,
+    height,
+    color: highlight.color,
+  }
+}
+
+function createCnnChainEdges(panels: CnnMatrixPanel[], lowDetailMode: boolean): VisualEdge[] {
+  if (panels.length < 2) return []
+  const edges: VisualEdge[] = []
+  const fanout = lowDetailMode ? 2 : 3
+
+  for (let pairIndex = 0; pairIndex < panels.length - 1; pairIndex += 1) {
+    const source = panels[pairIndex]
+    const target = panels[pairIndex + 1]
+    const sourcePoints = samplePanelConnectionPoints(source, 'right', lowDetailMode)
+    const targetPoints = samplePanelConnectionPoints(target, 'left', lowDetailMode)
+    if (sourcePoints.length === 0 || targetPoints.length === 0) continue
+
+    sourcePoints.forEach((sourcePoint, sourceIndex) => {
+      for (let branch = 0; branch < fanout; branch += 1) {
+        const targetIndex = (sourceIndex * fanout + branch * 2) % targetPoints.length
+        const targetPoint = targetPoints[targetIndex]
+        const weight = 0.35 + Math.abs(seededSigned(`chain:${source.id}:${target.id}:${sourceIndex}:${branch}`)) * 0.65
+        edges.push({
+          id: `cnn-chain:${pairIndex}:${source.id}:${target.id}:${sourceIndex}:${branch}`,
+          from: sourcePoint,
+          to: targetPoint,
+          weight,
+          sourceStageId: source.stageId,
+          targetStageId: target.stageId,
+          kind: 'stage_flow',
+        })
+      }
+    })
+  }
+
+  return edges
+}
+
+function samplePanelConnectionPoints(
+  panel: CnnMatrixPanel,
+  side: 'left' | 'right',
+  lowDetailMode: boolean
+): Vec3[] {
+  const points: Vec3[] = []
+  const isInput = panel.id === 'cnn_input_matrix'
+  const rows = lowDetailMode ? 3 : 4
+  const cols = lowDetailMode ? 3 : 4
+  const xSpan = isInput ? panel.depth : panel.width
+  const zSpan = isInput ? panel.width : panel.depth
+  const x =
+    panel.position[0] +
+    (side === 'right' ? 1 : -1) * xSpan * 0.5
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      const y = panel.position[1] + panel.height * 0.68 * (0.5 - row / (rows - 1))
+      const z = panel.position[2] + zSpan * 0.64 * (col / (cols - 1) - 0.5)
+      points.push([x, y, z])
+    }
+  }
+
+  return points
+}
+
 interface CnnSymbolicSceneProps {
   op: CnnConvolutionOp
   sourcePanel: CnnMatrixPanel
@@ -376,8 +769,6 @@ interface CnnSymbolicSceneProps {
   sourceHighlight: PanelHighlight | null
   targetHighlight: PanelHighlight | null
   selectedStageId: string | null
-  stageIndex: number
-  totalStages: number
   lowDetailMode: boolean
   activityPulse: number
   onSelectStage: (stageId: string) => void
@@ -390,8 +781,6 @@ function CnnSymbolicScene({
   sourceHighlight,
   targetHighlight,
   selectedStageId,
-  stageIndex,
-  totalStages,
   lowDetailMode,
   activityPulse,
   onSelectStage,
@@ -426,29 +815,9 @@ function CnnSymbolicScene({
 
   return (
     <group>
-      <Text
-        position={[-5.8, 1.92, 0]}
-        fontSize={0.19}
-        color="#d7ebff"
-        anchorX="center"
-        anchorY="middle"
-      >
-        {`Stage ${stageIndex}/${Math.max(1, totalStages)} · ${sourcePanel.label} -> ${targetPanel.label}`}
-      </Text>
-      <Text
-        position={[-5.8, 1.66, 0]}
-        fontSize={0.12}
-        color="#93b6d8"
-        anchorX="center"
-        anchorY="middle"
-      >
-        {'The filter scans the image, computes weighted sums, then writes one output value.'}
-      </Text>
-
       <CnnVolumePanel
         panel={sourcePanel}
         position={sourcePosition}
-        roleLabel="Input Feature Maps"
         highlight={sourceHighlight}
         selected={selectedStageId === sourcePanel.stageId}
         lowDetailMode={lowDetailMode}
@@ -466,7 +835,6 @@ function CnnSymbolicScene({
       <CnnVolumePanel
         panel={targetPanel}
         position={outputPosition}
-        roleLabel="Output Feature Maps"
         highlight={targetHighlight}
         selected={selectedStageId === targetPanel.stageId}
         lowDetailMode={lowDetailMode}
@@ -492,34 +860,6 @@ function CnnSymbolicScene({
         toneMapped={false}
       />
 
-      <Text
-        position={[-6.9, 0.86, 0]}
-        fontSize={0.25}
-        color="#ffe0a5"
-        anchorX="center"
-        anchorY="middle"
-      >
-        ×
-      </Text>
-      <Text
-        position={[-4.6, 0.86, 0]}
-        fontSize={0.25}
-        color="#ffe0a5"
-        anchorX="center"
-        anchorY="middle"
-      >
-        =
-      </Text>
-      <Text
-        position={[-5.75, 0.64, 0]}
-        fontSize={0.11}
-        color="#b9d0e6"
-        anchorX="center"
-        anchorY="middle"
-      >
-        {'dot product + bias + activation'}
-      </Text>
-
       <WeightVisual
         curve={leftCurve}
         speed={lowDetailMode ? 0.42 : 0.58}
@@ -543,7 +883,6 @@ function CnnSymbolicScene({
 interface CnnVolumePanelProps {
   panel: CnnMatrixPanel
   position: Vec3
-  roleLabel: string
   highlight: PanelHighlight | null
   selected: boolean
   lowDetailMode: boolean
@@ -553,7 +892,6 @@ interface CnnVolumePanelProps {
 function CnnVolumePanel({
   panel,
   position,
-  roleLabel,
   highlight,
   selected,
   lowDetailMode,
@@ -696,34 +1034,6 @@ function CnnVolumePanel({
           depthWrite={false}
         />
       </mesh>
-
-      <Text
-        position={[0, panelHeight / 2 + 0.25, 0]}
-        fontSize={0.14}
-        color="#dff1ff"
-        anchorX="center"
-        anchorY="middle"
-      >
-        {roleLabel}
-      </Text>
-      <Text
-        position={[0, panelHeight / 2 + 0.05, 0]}
-        fontSize={0.12}
-        color="#b8d2ea"
-        anchorX="center"
-        anchorY="middle"
-      >
-        {panel.label}
-      </Text>
-      <Text
-        position={[0, -panelHeight / 2 - 0.22, 0]}
-        fontSize={0.1}
-        color="#89aacb"
-        anchorX="center"
-        anchorY="middle"
-      >
-        {`${panel.trueRows}x${panel.trueCols} · ${panel.channels} channels`}
-      </Text>
     </group>
   )
 }
@@ -796,25 +1106,6 @@ function CnnKernelCube({ op, position, selected, lowDetailMode, onClick }: CnnKe
           <meshStandardMaterial color={cube.color} emissive={cube.color} emissiveIntensity={0.16} roughness={0.4} metalness={0.1} />
         </mesh>
       ))}
-
-      <Text
-        position={[0, size * cell / 2 + 0.33, 0]}
-        fontSize={0.12}
-        color="#ffe1b2"
-        anchorX="center"
-        anchorY="middle"
-      >
-        {'Filter Kernel'}
-      </Text>
-      <Text
-        position={[0, -size * cell / 2 - 0.26, 0]}
-        fontSize={0.1}
-        color="#d8bb96"
-        anchorX="center"
-        anchorY="middle"
-      >
-        {`k${op.kernelSize} · stride ${op.stride}`}
-      </Text>
     </group>
   )
 }
@@ -844,10 +1135,79 @@ function EdgeSegments({ edges, color, opacity }: EdgeSegmentsProps) {
   )
 }
 
+interface WeightedEdgeSegmentsProps {
+  edges: VisualEdge[]
+  lowColor: string
+  highColor: string
+  opacity: number
+}
+
+function WeightedEdgeSegments({ edges, lowColor, highColor, opacity }: WeightedEdgeSegmentsProps) {
+  const buffers = useMemo(
+    () => buildWeightedSegmentBuffers(edges, lowColor, highColor),
+    [edges, lowColor, highColor]
+  )
+  if (buffers.positions.length === 0) return null
+
+  return (
+    <lineSegments>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[buffers.positions, 3]} />
+        <bufferAttribute attach="attributes-color" args={[buffers.colors, 3]} />
+      </bufferGeometry>
+      <lineBasicMaterial
+        vertexColors
+        transparent
+        opacity={clampOpacity(opacity)}
+        depthWrite={false}
+      />
+    </lineSegments>
+  )
+}
+
+interface TransformerHeadStripProps {
+  count: number
+  lowDetailMode: boolean
+}
+
+function TransformerHeadStrip({ count, lowDetailMode }: TransformerHeadStripProps) {
+  const cubes = useMemo(() => {
+    const safeCount = clampInt(count, 2, 14)
+    const values: Array<{ position: Vec3; color: string }> = []
+    const colors = ['#4ea1ff', '#ffb429', '#8ad96f', '#ff6f6f', '#b58cff', '#66d6ff', '#ffd37a', '#7da0ff']
+    const width = safeCount * (lowDetailMode ? 0.28 : 0.32)
+    for (let index = 0; index < safeCount; index += 1) {
+      values.push({
+        position: [7.35 - width / 2 + index * (lowDetailMode ? 0.28 : 0.32), 3.02, -0.08],
+        color: colors[index % colors.length],
+      })
+    }
+    return values
+  }, [count, lowDetailMode])
+
+  return (
+    <group>
+      {cubes.map((cube, index) => (
+        <mesh key={`head-cube-${index}`} position={cube.position} raycast={IGNORE_RAYCAST}>
+          <boxGeometry args={[lowDetailMode ? 0.22 : 0.25, 0.13, 0.12]} />
+          <meshStandardMaterial
+            color={cube.color}
+            emissive={cube.color}
+            emissiveIntensity={0.22}
+            roughness={0.4}
+            metalness={0.08}
+          />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
 interface TokenNodeProps {
   node: VisualNode
   selected: boolean
   active: boolean
+  activation: number
   lowDetailMode: boolean
   outlineColor: string
   onSelectStage: (stageId: string) => void
@@ -857,6 +1217,7 @@ function TokenNode({
   node,
   selected,
   active,
+  activation,
   lowDetailMode,
   outlineColor,
   onSelectStage,
@@ -864,6 +1225,13 @@ function TokenNode({
   const [hovered, setHovered] = useState(false)
   const segments = getSphereSegments(node, lowDetailMode)
   const outlineOpacity = active ? 0.95 : selected ? 0.86 : hovered ? 0.72 : 0.48
+  const isStageNode = node.kind === 'stage'
+  const baseColor = isStageNode ? '#5a5a5a' : '#6f6f6f'
+  const baseEmissive = isStageNode ? '#1f1f1f' : '#191919'
+  const activationClamped = THREE.MathUtils.clamp(activation, 0, 1)
+  const coreIntensity = isStageNode
+    ? (active ? 0.74 : selected || hovered ? 0.52 : 0.3)
+    : (0.18 + activationClamped * 0.72 + (selected || hovered ? 0.1 : 0))
 
   return (
     <group position={node.position}>
@@ -883,9 +1251,9 @@ function TokenNode({
       >
         <sphereGeometry args={[node.radius, segments, segments]} />
         <meshStandardMaterial
-          color="#6f6f6f"
-          emissive="#191919"
-          emissiveIntensity={active ? 0.66 : selected || hovered ? 0.48 : 0.26}
+          color={baseColor}
+          emissive={baseEmissive}
+          emissiveIntensity={coreIntensity}
           roughness={0.55}
           metalness={0.08}
         />
@@ -896,7 +1264,7 @@ function TokenNode({
         <meshBasicMaterial
           color={active ? '#ffcb67' : outlineColor}
           transparent
-          opacity={outlineOpacity}
+          opacity={THREE.MathUtils.clamp(outlineOpacity + activationClamped * 0.18, 0.08, 0.98)}
           side={THREE.BackSide}
           depthWrite={false}
         />
@@ -904,9 +1272,9 @@ function TokenNode({
 
       {active ? (
         <mesh raycast={IGNORE_RAYCAST}>
-          <ringGeometry args={[node.radius * 1.3, node.radius * 1.66, 24]} />
+          <ringGeometry args={[node.radius * 1.3, node.radius * (isStageNode ? 1.92 : 1.66), 24]} />
           <meshBasicMaterial
-            color="#ffe18a"
+            color={isStageNode ? outlineColor : '#ffe18a'}
             transparent
             opacity={0.86}
             side={THREE.DoubleSide}
@@ -926,7 +1294,7 @@ function createCnnMatrixPipeline(
   const maxCells = lowDetailMode ? MAX_MATRIX_CELLS_LOW : MAX_MATRIX_CELLS_HIGH
   const input = architecture.blueprint.input
 
-  const rawPanels: Array<Omit<CnnMatrixPanel, 'position' | 'width' | 'height'>> = []
+  const rawPanels: Array<Omit<CnnMatrixPanel, 'position' | 'width' | 'height' | 'depth'>> = []
   const rawOps: Array<Omit<CnnConvolutionOp, 'kernelPosition'>> = []
 
   const inputGrid = reduceMatrixGrid(input.height, input.width, maxCells)
@@ -947,6 +1315,7 @@ function createCnnMatrixPipeline(
   let previousPanelId = rawPanels[0].id
   let currentHeight = Math.max(1, input.height)
   let currentWidth = Math.max(1, input.width)
+  let currentChannels = Math.max(1, input.channels)
 
   architecture.blueprint.cnn.stages.forEach((stage, index) => {
     const stride = Math.max(1, Math.floor(stage.stride ?? 1))
@@ -991,20 +1360,86 @@ function createCnnMatrixPipeline(
     previousPanelId = panelId
     currentHeight = outHeight
     currentWidth = outWidth
+    currentChannels = outChannels
   })
 
-  const step =
-    rawPanels.length > 1 ? (CNN_X_END - CNN_X_START) / (rawPanels.length - 1) : 0
+  const representedStages = new Set(rawPanels.map((panel) => panel.stageId))
+  const tailStages = architecture.stages.filter((stage) => !representedStages.has(stage.id))
+  tailStages.forEach((stage, index) => {
+    const stageIdLower = stage.id.toLowerCase()
+    const isHeadLike =
+      stageIdLower.includes('head') ||
+      stageIdLower.includes('output') ||
+      stageIdLower.includes('prediction')
+    const isTransformerLike =
+      stageIdLower.includes('transformer') ||
+      stageIdLower.includes('decoder') ||
+      stageIdLower.includes('encoder') ||
+      stageIdLower.includes('query')
 
-  const panels: CnnMatrixPanel[] = rawPanels.map((panel, index) => {
-    const [width, height] = matrixPanelSize(panel.rows, panel.cols)
+    currentHeight = Math.max(1, Math.floor(currentHeight * (isHeadLike ? 0.5 : isTransformerLike ? 0.72 : 0.8)))
+    currentWidth = Math.max(1, Math.floor(currentWidth * (isHeadLike ? 0.5 : isTransformerLike ? 0.72 : 0.8)))
+    currentChannels = Math.max(1, Math.floor(currentChannels * (isHeadLike ? 0.45 : 0.8)))
+
+    const grid = reduceMatrixGrid(currentHeight, currentWidth, maxCells)
+    const panelId = `tail_${stage.id}_${index}`
+
+    rawPanels.push({
+      id: panelId,
+      stageId: stage.id,
+      label: stage.label,
+      detail: stage.detail,
+      color: colorMap.get(stage.id) ?? stage.color ?? '#ffd37a',
+      trueRows: currentHeight,
+      trueCols: currentWidth,
+      rows: grid.rows,
+      cols: grid.cols,
+      channels: currentChannels,
+      sliceCount: lowDetailMode
+        ? clampInt(Math.round(Math.log2(currentChannels + 1)), 1, 3)
+        : clampInt(Math.round(Math.log2(currentChannels + 1)), 1, 5),
+    })
+
+    rawOps.push({
+      id: `tail_op_${stage.id}_${index}`,
+      stageId: stage.id,
+      sourcePanelId: previousPanelId,
+      targetPanelId: panelId,
+      kernelSize: 1,
+      stride: 1,
+    })
+    previousPanelId = panelId
+  })
+
+  const maxSpatial = Math.max(
+    1,
+    ...rawPanels.map((panel) => Math.sqrt(panel.trueRows * panel.trueCols))
+  )
+  const panelShells = rawPanels.map((panel) => {
+    const [width, height, depth] = matrixPanelSize(panel, maxSpatial, lowDetailMode)
+    return { panel, width, height, depth }
+  })
+  const gap = lowDetailMode ? 1.02 : 1.18
+  let cursorX = 0
+  const placed = panelShells.map((entry) => {
+    const centerX = cursorX + entry.width * 0.5
+    cursorX += entry.width + gap
     return {
-      ...panel,
-      width,
-      height,
-      position: [CNN_X_START + step * index, 0, 0],
+      ...entry,
+      centerX,
     }
   })
+  const firstCenter = placed[0]?.centerX ?? 0
+  const lastCenter = placed[placed.length - 1]?.centerX ?? 0
+  const shift = -1.3 - (firstCenter + lastCenter) * 0.5
+
+  const panels: CnnMatrixPanel[] = placed.map((entry) => ({
+    ...entry.panel,
+    width: entry.width,
+    height: entry.height,
+    depth: entry.depth,
+    position: [entry.centerX + shift, 0, 0],
+  }))
 
   const panelLookup = new Map(panels.map((panel) => [panel.id, panel]))
 
@@ -1076,10 +1511,21 @@ function reduceMatrixGrid(rows: number, cols: number, maxCells: number): { rows:
   return { rows: nextRows, cols: nextCols }
 }
 
-function matrixPanelSize(rows: number, cols: number): [number, number] {
-  const width = Math.max(0.95, cols * MATRIX_CELL_SIZE + MATRIX_PADDING * 2)
-  const height = Math.max(0.95, rows * MATRIX_CELL_SIZE + MATRIX_PADDING * 2)
-  return [width, height]
+function matrixPanelSize(
+  panel: Omit<CnnMatrixPanel, 'position' | 'width' | 'height' | 'depth'>,
+  maxSpatial: number,
+  lowDetailMode: boolean
+): [number, number, number] {
+  const isInput = panel.id === 'cnn_input_matrix'
+  const spatial = Math.sqrt(Math.max(1, panel.trueRows * panel.trueCols))
+  const ratio = THREE.MathUtils.clamp(spatial / maxSpatial, 0.08, 1)
+  const squareSize = (lowDetailMode ? 0.96 : 1.08) + ratio * (lowDetailMode ? 2.25 : 2.65)
+  const depth = isInput
+    ? (lowDetailMode ? 0.34 : 0.4)
+    : 0.52 + Math.min(lowDetailMode ? 1.15 : 1.5, Math.log2(panel.channels + 1) * (lowDetailMode ? 0.17 : 0.2))
+  const width = isInput ? (lowDetailMode ? 0.3 : 0.34) : squareSize
+  const height = squareSize
+  return [width, height, depth]
 }
 
 function createPanelHighlights(
@@ -1185,92 +1631,131 @@ function buildMatrixGridLinesWithCellSize(
   return new Float32Array(values)
 }
 
-function createTokens(stageId: string, count: number): VisualNode[] {
-  if (count <= 0) return []
-  const safeCount = Math.max(1, count)
-  const nodes: VisualNode[] = []
-  const goldenAngle = Math.PI * (3 - Math.sqrt(5))
-  const tokenSegments = safeCount > 1800 ? 5 : safeCount > 900 ? 6 : 8
+function createTransformerRailGraph(
+  stageId: string,
+  count: number,
+  lowDetailMode: boolean
+): TransformerRailGraph {
+  const tokenCount = clampInt(count, 2, lowDetailMode ? 24 : 40)
+  const spacing = lowDetailMode ? 0.24 : 0.27
+  const radius = lowDetailMode ? 0.08 : 0.092
+  const depthSpread = lowDetailMode ? 0.14 : 0.2
+  const leftTokens: VisualNode[] = []
+  const rightTokens: VisualNode[] = []
+  const railEdges: VisualEdge[] = []
+  const alignmentEdges: VisualEdge[] = []
 
-  for (let index = 0; index < safeCount; index += 1) {
-    const radius = 1.05 + 0.105 * Math.sqrt(index + 1)
-    const angle = index * goldenAngle
-    nodes.push({
-      id: `tok_${index}`,
+  for (let index = 0; index < tokenCount; index += 1) {
+    const y = TRANSFORMER_TOP_Y - index * spacing
+    const jitter = seededSigned(`transformer-jitter:${index}`) * depthSpread
+    const leftNode: VisualNode = {
+      id: `tok_left_${index}`,
       stageId,
       kind: 'token',
-      radius: 0.08,
-      segments: tokenSegments,
-      position: [
-        TOKEN_CENTER_X + Math.cos(angle) * radius,
-        Math.sin(angle * 0.55) * 0.22,
-        TOKEN_CENTER_Z + Math.sin(angle) * radius,
-      ],
-    })
+      radius,
+      segments: lowDetailMode ? 7 : 9,
+      position: [TRANSFORMER_LEFT_X, y, -0.86 + jitter],
+    }
+    const rightNode: VisualNode = {
+      id: `tok_right_${index}`,
+      stageId,
+      kind: 'token',
+      radius,
+      segments: lowDetailMode ? 7 : 9,
+      position: [TRANSFORMER_RIGHT_X, y, 0.86 - jitter * 0.65],
+    }
+    leftTokens.push(leftNode)
+    rightTokens.push(rightNode)
   }
 
-  return nodes
-}
-
-function createTokenChainEdges(tokens: VisualNode[], lowDetailMode: boolean): VisualEdge[] {
-  if (tokens.length <= 1) return []
-  const stride = lowDetailMode ? Math.max(1, Math.floor(tokens.length / 120)) : 1
-  const edges: VisualEdge[] = []
-
-  for (let index = 0; index < tokens.length; index += stride) {
-    const token = tokens[index]
-    const next = tokens[(index + stride) % tokens.length]
-    edges.push({
-      id: `chain:${token.id}:${next.id}`,
-      from: token.position,
-      to: next.position,
-      weight: 0.7,
-      sourceStageId: token.stageId,
-      targetStageId: next.stageId,
+  for (let index = 0; index < tokenCount; index += 1) {
+    const left = leftTokens[index]
+    const right = rightTokens[index]
+    alignmentEdges.push({
+      id: `align:${left.id}:${right.id}`,
+      from: left.position,
+      to: right.position,
+      weight: 0.28 + Math.abs(seededSigned(`align:${index}`)) * 0.18,
+      sourceStageId: stageId,
+      targetStageId: stageId,
       kind: 'token_chain',
     })
   }
 
-  return edges
+  for (let index = 0; index < tokenCount - 1; index += 1) {
+    const leftA = leftTokens[index]
+    const leftB = leftTokens[index + 1]
+    const rightA = rightTokens[index]
+    const rightB = rightTokens[index + 1]
+    railEdges.push({
+      id: `rail-left:${leftA.id}:${leftB.id}`,
+      from: leftA.position,
+      to: leftB.position,
+      weight: 0.26,
+      sourceStageId: stageId,
+      targetStageId: stageId,
+      kind: 'token_chain',
+    })
+    railEdges.push({
+      id: `rail-right:${rightA.id}:${rightB.id}`,
+      from: rightA.position,
+      to: rightB.position,
+      weight: 0.26,
+      sourceStageId: stageId,
+      targetStageId: stageId,
+      kind: 'token_chain',
+    })
+  }
+
+  return { leftTokens, rightTokens, railEdges, alignmentEdges }
 }
 
 function createAttentionState(
-  tokens: VisualNode[],
+  sourceTokens: VisualNode[],
+  targetTokens: VisualNode[],
   architecture: VLMArchitectureSpec,
   step: number,
   lowDetailMode: boolean
 ): AttentionState {
   const activeTokenIds = new Set<string>()
-  if (tokens.length <= 1) return { edges: [], activeTokenIds }
+  const activationById = new Map<string, number>()
+  if (sourceTokens.length <= 1 || targetTokens.length <= 1) {
+    return { edges: [], activeTokenIds, activationById }
+  }
 
   const configuredHeads = Math.max(1, architecture.blueprint.transformer.attention_heads)
   const headCount = lowDetailMode
     ? Math.max(1, Math.min(4, Math.ceil(configuredHeads / 2)))
     : configuredHeads
-  const targetsPerHead = lowDetailMode ? 2 : 4
+  const targetsPerHead = lowDetailMode ? 3 : 5
   const edges: VisualEdge[] = []
 
   for (let head = 0; head < headCount; head += 1) {
-    const sourceIndex = (step * (head + 2) + head * 13) % tokens.length
-    const source = tokens[sourceIndex]
+    const sourceIndex = (step * (head + 2) + head * 13) % sourceTokens.length
+    const source = sourceTokens[sourceIndex]
     activeTokenIds.add(source.id)
+    activationById.set(source.id, Math.max(activationById.get(source.id) ?? 0, 0.74))
 
-    const candidates = tokens
-      .filter((token) => token.id !== source.id)
+    const candidates = targetTokens
       .map((target, targetIndex) => ({
         target,
         score: dynamicAttentionScore(source, target, head, step, targetIndex),
       }))
       .sort((a, b) => b.score - a.score)
-      .slice(0, Math.min(targetsPerHead, tokens.length - 1))
+      .slice(0, Math.min(targetsPerHead, targetTokens.length))
 
     candidates.forEach((entry, rank) => {
       activeTokenIds.add(entry.target.id)
+      const targetActivation = entry.score * (1 - rank * 0.1)
+      activationById.set(
+        entry.target.id,
+        Math.max(activationById.get(entry.target.id) ?? 0, targetActivation)
+      )
       edges.push({
         id: `att:h${head}:${source.id}:${entry.target.id}`,
         from: source.position,
         to: entry.target.position,
-        weight: entry.score * (1 - rank * 0.12),
+        weight: targetActivation,
         sourceStageId: source.stageId,
         targetStageId: entry.target.stageId,
         kind: 'attention',
@@ -1278,7 +1763,7 @@ function createAttentionState(
     })
   }
 
-  return { edges, activeTokenIds }
+  return { edges, activeTokenIds, activationById }
 }
 
 function dynamicAttentionScore(
@@ -1329,6 +1814,128 @@ function buildSegmentPositions(edges: VisualEdge[]): Float32Array {
     )
   }
   return new Float32Array(values)
+}
+
+function buildWeightedSegmentBuffers(
+  edges: VisualEdge[],
+  lowColor: string,
+  highColor: string
+): { positions: Float32Array; colors: Float32Array } {
+  if (edges.length === 0) {
+    return { positions: new Float32Array(), colors: new Float32Array() }
+  }
+
+  const positions: number[] = []
+  const colors: number[] = []
+  const low = new THREE.Color(lowColor)
+  const high = new THREE.Color(highColor)
+
+  for (const edge of edges) {
+    const weight = THREE.MathUtils.clamp(edge.weight, 0, 1)
+    const color = low.clone().lerp(high, weight)
+    positions.push(
+      edge.from[0], edge.from[1], edge.from[2],
+      edge.to[0], edge.to[1], edge.to[2]
+    )
+    colors.push(
+      color.r, color.g, color.b,
+      color.r, color.g, color.b
+    )
+  }
+
+  return {
+    positions: new Float32Array(positions),
+    colors: new Float32Array(colors),
+  }
+}
+
+function createStageFlowGraph(architecture: VLMArchitectureSpec, lowDetailMode: boolean): StageFlowGraph {
+  if (architecture.stages.length === 0) {
+    return { nodes: [], edges: [] }
+  }
+
+  const nodes: VisualNode[] = []
+  const edges: VisualEdge[] = []
+  const stageNodeLookup = new Map<string, VisualNode[]>()
+  const baseRadius = lowDetailMode ? 0.064 : 0.078
+  const nodeGap = lowDetailMode ? 0.31 : 0.37
+
+  architecture.stages.forEach((stage, stageIndex) => {
+    const nodeCount = stageNodeCount(stage.id, stageIndex, lowDetailMode)
+    const cols = clampInt(Math.ceil(Math.sqrt(nodeCount)), 2, 7)
+    const rows = clampInt(Math.ceil(nodeCount / cols), 2, 6)
+    const depthBand = stageDepthBand(stageIndex)
+    const stageNodes: VisualNode[] = []
+
+    for (let index = 0; index < nodeCount; index += 1) {
+      const row = Math.floor(index / cols)
+      const col = index % cols
+      const x = stage.position[0] * 0.95
+      const y = 2.8 - (rows - 1) * nodeGap * 0.5 + row * nodeGap
+      const z = depthBand + (col - (cols - 1) / 2) * nodeGap * 0.68
+      const node: VisualNode = {
+        id: `stage:${stage.id}:${index}`,
+        stageId: stage.id,
+        kind: 'stage',
+        radius: baseRadius,
+        position: [x, y, z],
+        segments: lowDetailMode ? 7 : 10,
+      }
+      nodes.push(node)
+      stageNodes.push(node)
+    }
+
+    stageNodeLookup.set(stage.id, stageNodes)
+  })
+
+  for (let stageIndex = 0; stageIndex < architecture.stages.length - 1; stageIndex += 1) {
+    const sourceStage = architecture.stages[stageIndex]
+    const targetStage = architecture.stages[stageIndex + 1]
+    const sourceNodes = stageNodeLookup.get(sourceStage.id) ?? []
+    const targetNodes = stageNodeLookup.get(targetStage.id) ?? []
+    const targetStep = lowDetailMode ? 2 : 3
+    const sourceStride = lowDetailMode ? 2 : 1
+
+    for (let sourceIndex = 0; sourceIndex < sourceNodes.length; sourceIndex += sourceStride) {
+      const source = sourceNodes[sourceIndex]
+      const base = Math.abs(Math.round(seededSigned(`${source.id}:${targetStage.id}`) * 10000))
+      for (let offset = 0; offset < targetStep; offset += 1) {
+        const target = targetNodes[(base + offset * 2) % Math.max(1, targetNodes.length)]
+        if (!target) continue
+        edges.push({
+          id: `stageflow:${source.id}->${target.id}:${offset}`,
+          from: source.position,
+          to: target.position,
+          weight: 0.58,
+          sourceStageId: source.stageId,
+          targetStageId: target.stageId,
+          kind: 'stage_flow',
+        })
+      }
+    }
+  }
+
+  return { nodes, edges }
+}
+
+function stageNodeCount(stageId: string, stageIndex: number, lowDetailMode: boolean): number {
+  const id = stageId.toLowerCase()
+  const base = lowDetailMode ? 10 : 16
+  if (id.includes('input')) return lowDetailMode ? 12 : 20
+  if (id.includes('preprocess') || id.includes('patch')) return lowDetailMode ? 10 : 14
+  if (id.includes('backbone') || id.includes('conv') || id.includes('encoder')) {
+    return lowDetailMode ? 14 : 24
+  }
+  if (id.includes('transformer') || id.includes('decoder') || id.includes('blocks') || id.includes('queries')) {
+    return lowDetailMode ? 16 : 28
+  }
+  if (id.includes('head') || id.includes('output') || id.includes('prediction')) return lowDetailMode ? 10 : 16
+  return base + (stageIndex % 3) * (lowDetailMode ? 2 : 3)
+}
+
+function stageDepthBand(stageIndex: number): number {
+  const depthPattern = [-1.2, 0.85, -0.45, 1.15]
+  return depthPattern[stageIndex % depthPattern.length]
 }
 
 function resolveStageRoles(stages: VLMArchitectureStage[]): StageRoles {

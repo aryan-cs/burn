@@ -16,8 +16,16 @@ interface TrainingConfigView {
   loss: string
 }
 
+interface LossLandscapeTopology {
+  layerCount: number
+  neuronCount: number
+  weightCount: number
+  biasCount: number
+}
+
 interface TrainTabProps {
   trainingConfig: TrainingConfigView
+  lossLandscapeTopology: LossLandscapeTopology
   isBackendBusy: boolean
   onDatasetChange: (value: string) => void
   onLocationChange: (value: 'local' | 'cloud') => void
@@ -46,6 +54,7 @@ interface TrainTabProps {
 
 export function TrainTab({
   trainingConfig,
+  lossLandscapeTopology,
   isBackendBusy,
   onDatasetChange,
   onLocationChange,
@@ -71,10 +80,13 @@ export function TrainTab({
   trainDisabled,
   trainLabel,
 }: TrainTabProps) {
+  const settingsLocked = isBackendBusy || isTraining
+
   return (
     <div className="tab-panel">
       <section className="panel-card panel-card-fill">
         <TrainGraphsBlock
+          lossLandscapeTopology={lossLandscapeTopology}
           trainAccuracySeries={trainAccuracySeries}
           testAccuracySeries={testAccuracySeries}
           trainLossSeries={trainLossSeries}
@@ -95,7 +107,7 @@ export function TrainTab({
             <span className="config-label">Dataset</span>
             <select
               value={trainingConfig.dataset}
-              disabled={isBackendBusy}
+              disabled={settingsLocked}
               onChange={(e) => onDatasetChange(e.target.value)}
               className="config-control"
             >
@@ -108,7 +120,7 @@ export function TrainTab({
             <span className="config-label">Location</span>
             <select
               value={trainingConfig.location}
-              disabled={isBackendBusy}
+              disabled={settingsLocked}
               onChange={(e) => onLocationChange(e.target.value as 'local' | 'cloud')}
               className="config-control"
             >
@@ -124,7 +136,7 @@ export function TrainTab({
               min={0.000001}
               step={0.0001}
               value={trainingConfig.learningRate}
-              disabled={isBackendBusy}
+              disabled={settingsLocked}
               onChange={(e) =>
                 onLearningRateChange(Math.max(0.000001, Number(e.target.value) || 0.000001))
               }
@@ -138,7 +150,7 @@ export function TrainTab({
               type="number"
               min={1}
               value={trainingConfig.batchSize}
-              disabled={isBackendBusy}
+              disabled={settingsLocked}
               onChange={(e) => onBatchSizeChange(Math.max(1, Number(e.target.value) || 1))}
               className="config-control config-control-numeric"
             />
@@ -150,7 +162,7 @@ export function TrainTab({
               type="number"
               min={1}
               value={trainingConfig.epochs}
-              disabled={isBackendBusy}
+              disabled={settingsLocked}
               onChange={(e) => onEpochsChange(Math.max(1, Number(e.target.value) || 1))}
               className="config-control config-control-numeric"
             />
@@ -160,7 +172,7 @@ export function TrainTab({
             <span className="config-label">Optimizer</span>
             <select
               value={trainingConfig.optimizer}
-              disabled={isBackendBusy}
+              disabled={settingsLocked}
               onChange={(e) => onOptimizerChange(e.target.value)}
               className="config-control"
             >
@@ -176,7 +188,7 @@ export function TrainTab({
             <span className="config-label">Loss Function</span>
             <select
               value={trainingConfig.loss}
-              disabled={isBackendBusy}
+              disabled={settingsLocked}
               onChange={(e) => onLossChange(e.target.value)}
               className="config-control"
             >
@@ -214,6 +226,7 @@ export function TrainTab({
 }
 
 interface TrainGraphsBlockProps {
+  lossLandscapeTopology: LossLandscapeTopology
   trainLossSeries: number[]
   testLossSeries: number[]
   trainAccuracySeries: number[]
@@ -228,6 +241,7 @@ interface TrainGraphsBlockProps {
 }
 
 function TrainGraphsBlock({
+  lossLandscapeTopology,
   trainLossSeries,
   testLossSeries,
   trainAccuracySeries,
@@ -319,6 +333,7 @@ function TrainGraphsBlock({
             optimizer={optimizer}
             currentEpoch={currentEpoch}
             totalEpochs={totalEpochs}
+            topology={lossLandscapeTopology}
           />
         </div>
       </div>

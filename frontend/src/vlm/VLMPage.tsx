@@ -39,6 +39,11 @@ interface VLMDetection {
   box: [number, number, number, number]
 }
 
+interface SmoothedDetection extends VLMDetection {
+  confidence: number
+  lastSeenMs: number
+}
+
 interface VLMInferResponse {
   job_id_used?: string | null
   runtime_backend: string
@@ -178,15 +183,19 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
   const [liveModeEnabled, setLiveModeEnabled] = useState(true)
   const [liveInferenceRunning, setLiveInferenceRunning] = useState(false)
   const [detections, setDetections] = useState<VLMDetection[]>([])
+  const [isDetectionModalOpen, setIsDetectionModalOpen] = useState(false)
   const [scoreThreshold, setScoreThreshold] = useState(0.45)
   const [lastImageSize, setLastImageSize] = useState<[number, number] | null>(null)
+  const [viewportResetKey, setViewportResetKey] = useState(0)
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const fullscreenCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const liveInferenceBusyRef = useRef(false)
   const liveUiTickRef = useRef(0)
+  const smoothedDetectionsRef = useRef<SmoothedDetection[]>([])
 
   const [architecture, setArchitecture] = useState<VLMArchitectureSpec>(
     () => getVlmArchitecture(config.modelId)
@@ -244,6 +253,41 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
   )
 
   const isBusy = busyAction !== null
+  const handleAlignViewport = useCallback(() => {
+    setSelectedStageId(architecture.stages[0]?.id ?? null)
+    setViewportResetKey((current) => current + 1)
+  }, [architecture.stages])
+  const syncFullscreenCanvas = useCallback((sourceCanvas: HTMLCanvasElement) => {
+    const targetCanvas = fullscreenCanvasRef.current
+    if (!targetCanvas || !isDetectionModalOpen) return
+    if (targetCanvas.width !== sourceCanvas.width || targetCanvas.height !== sourceCanvas.height) {
+      targetCanvas.width = sourceCanvas.width
+      targetCanvas.height = sourceCanvas.height
+    }
+    const targetContext = targetCanvas.getContext('2d')
+    if (!targetContext) return
+    targetContext.clearRect(0, 0, targetCanvas.width, targetCanvas.height)
+    targetContext.drawImage(sourceCanvas, 0, 0, targetCanvas.width, targetCanvas.height)
+  }, [isDetectionModalOpen])
+
+  useEffect(() => {
+    if (!isDetectionModalOpen) return
+    const sourceCanvas = canvasRef.current
+    if (sourceCanvas) {
+      syncFullscreenCanvas(sourceCanvas)
+    }
+  }, [isDetectionModalOpen, syncFullscreenCanvas])
+
+  useEffect(() => {
+    if (!isDetectionModalOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsDetectionModalOpen(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isDetectionModalOpen])
 
   const runAction = useCallback(async (name: string, fn: () => Promise<void>) => {
     if (isBusy) return
@@ -443,11 +487,20 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
         }),
       })
 
-      drawDetections(context, response.detections)
+      const nowMs = performance.now()
+      const smoothedDetections = smoothDetections(
+        smoothedDetectionsRef.current,
+        response.detections,
+        nowMs
+      )
+      smoothedDetectionsRef.current = smoothedDetections
+
+      drawDetections(context, smoothedDetections)
+      syncFullscreenCanvas(canvas)
       const shouldSyncUi = !silent || liveUiTickRef.current % 3 === 0
       liveUiTickRef.current += 1
       if (shouldSyncUi) {
-        setDetections(response.detections)
+        setDetections(smoothedDetections)
         setLastImageSize([response.image_width, response.image_height])
         setRuntimeWarning(response.warning ?? null)
       }
@@ -455,13 +508,13 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
       if (!silent) {
         const runtimeLabel = `${response.runtime_backend} · ${response.runtime_model_id}`
         setMessage(
-          response.detections.length > 0
-            ? `Detected ${response.detections.length} object(s) using ${runtimeLabel}.`
+          smoothedDetections.length > 0
+            ? `Detected ${smoothedDetections.length} object(s) using ${runtimeLabel}.`
             : `No objects detected above threshold (${runtimeLabel}).`
         )
       }
     },
-    [cameraReady, jobId, scoreThreshold]
+    [cameraReady, jobId, scoreThreshold, syncFullscreenCanvas]
   )
 
   useEffect(() => {
@@ -548,6 +601,7 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
     if (videoRef.current) {
       videoRef.current.srcObject = null
     }
+    smoothedDetectionsRef.current = []
     setCameraReady(false)
     setLiveInferenceRunning(false)
     setMessage('Camera stopped.')
@@ -621,6 +675,14 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
         context.clearRect(0, 0, canvas.width, canvas.height)
       }
     }
+    const fullscreenCanvas = fullscreenCanvasRef.current
+    if (fullscreenCanvas) {
+      const fullscreenContext = fullscreenCanvas.getContext('2d')
+      if (fullscreenContext) {
+        fullscreenContext.clearRect(0, 0, fullscreenCanvas.width, fullscreenCanvas.height)
+      }
+    }
+    smoothedDetectionsRef.current = []
     setDetections([])
     setLastImageSize(null)
     setMessage('Cleared last detection result.')
@@ -708,7 +770,7 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
               </section>
 
               <section className="panel-card layer-editor-card">
-                <div className="config-grid">
+                <div className="config-grid vlm-test-status-grid">
                   <label className="config-row">
                     <span className="config-label">Dataset</span>
                     <select
@@ -767,14 +829,6 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
                   </div>
                 </div>
 
-                <div className="panel-actions-split">
-                  <button type="button" className="btn btn-ghost vlm-action-button" onClick={() => setActiveTab('train')}>
-                    Go To Train
-                  </button>
-                  <button type="button" className="btn btn-ghost vlm-action-button" onClick={() => setActiveTab('test')}>
-                    Go To Test
-                  </button>
-                </div>
               </section>
             </div>
           ) : null}
@@ -917,12 +971,12 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
                     <span className="config-label">Interval</span>
                     <span className="status-pill status-pill-idle">{LIVE_INFER_INTERVAL_MS}ms</span>
                   </div>
-                  <div className="config-row">
-                    <span className="config-label">Threshold</span>
-                    <span className="status-pill status-pill-idle">{scoreThreshold.toFixed(2)}</span>
-                  </div>
                 </div>
                 <div className="vlm-slider-wrap">
+                  <div className="vlm-slider-head">
+                    <span className="config-label">Detection Threshold</span>
+                    <span className="status-pill status-pill-idle">{scoreThreshold.toFixed(2)}</span>
+                  </div>
                   <input
                     className="vlm-score-slider"
                     type="range"
@@ -932,10 +986,11 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
                     value={scoreThreshold}
                     onChange={(event) => setScoreThreshold(Number(event.target.value))}
                   />
+                  <p className="vlm-slider-help">Higher values show fewer, higher-confidence detections.</p>
                 </div>
                 {runtimeWarning ? <p className="build-feedback-item build-feedback-item-warning">{runtimeWarning}</p> : null}
 
-                <div className="panel-actions vlm-inline-actions">
+                <div className="panel-actions vlm-inline-actions vlm-test-actions">
                   <button type="button" className="btn btn-ghost" onClick={startCamera} disabled={isBusy || cameraReady}>
                     {busyAction === 'camera_start' ? 'Starting...' : 'Start Camera'}
                   </button>
@@ -964,7 +1019,20 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
                     <video ref={videoRef} className="vlm-video" autoPlay muted playsInline />
                   </div>
                   <div className="vlm-feed-card">
-                    <p>Detection Frame</p>
+                    <div className="vlm-feed-card-head">
+                      <p>Detection Frame</p>
+                      <button
+                        type="button"
+                        className="vlm-frame-expand-button"
+                        aria-label="Open detection frame fullscreen"
+                        title="Open fullscreen"
+                        onClick={() => setIsDetectionModalOpen(true)}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="#e3e3e3">
+                          <path d="M220-220h140v-80h-60v-60h-80v140Zm380 0h140v-140h-80v60h-60v80ZM220-600h80v-60h60v-80H220v140Zm440 0h80v-140H600v80h60v60ZM120-120v-300h80v220h220v80H120Zm420 0v-80h220v-220h80v300H540ZM120-540v-300h300v80H200v220h-80Zm640 0v-220H540v-80h300v300h-80Z"/>
+                        </svg>
+                      </button>
+                    </div>
                     <canvas ref={canvasRef} className="vlm-canvas" />
                   </div>
                 </div>
@@ -1011,8 +1079,19 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
             </svg>
           )}
         </button>
+        <a
+          href="/"
+          className="builder-home-button"
+          aria-label="Go to home"
+          title="Home"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3">
+            <path d="M240-200h120v-240h240v240h120v-360L480-740 240-560v360Zm-80 80v-480l320-240 320 240v480H520v-240h-80v240H160Zm320-350Z" />
+          </svg>
+        </a>
 
         <VLMArchitectureViewport
+          key={viewportResetKey}
           architecture={architecture}
           selectedStageId={selectedStage?.id ?? null}
           onSelectStage={setSelectedStageId}
@@ -1020,22 +1099,23 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
           activityPulse={activityPulse}
         />
 
-        <div className="vlm-viewport-topbar">
-          <div className="vlm-viewport-heading">{architecture.name}</div>
-          <div className="vlm-viewport-chips">
-            <span className="vlm-chip">dataset: {datasetName}</span>
-            <span className="vlm-chip">status: {status}</span>
-            <span className="vlm-chip">ws: {wsState}</span>
-          </div>
-        </div>
-
-        {selectedStage ? (
-          <div className="vlm-stage-focus">
-            <div className="vlm-stage-focus-title">{selectedStage.label}</div>
-            <div className="vlm-stage-focus-detail">{selectedStage.detail}</div>
-            <p>{selectedStage.description}</p>
-          </div>
-        ) : null}
+        <button
+          type="button"
+          onClick={handleAlignViewport}
+          aria-label="Align"
+          title="Align"
+          className="align-button"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            height="24px"
+            viewBox="0 -960 960 960"
+            width="24px"
+            fill="#e3e3e3"
+          >
+            <path d="M180-120q-24 0-42-18t-18-42v-172h60v172h172v60H180Zm428 0v-60h172v-172h60v172q0 24-18 42t-42 18H608ZM120-608v-172q0-24 18-42t42-18h172v60H180v172h-60Zm660 0v-172H608v-60h172q24 0 42 18t18 42v172h-60ZM347.5-347.5Q293-402 293-480t54.5-132.5Q402-667 480-667t132.5 54.5Q667-558 667-480t-54.5 132.5Q558-293 480-293t-132.5-54.5Zm223-42Q607-426 607-480t-36.5-90.5Q534-607 480-607t-90.5 36.5Q353-534 353-480t36.5 90.5Q426-353 480-353t90.5-36.5ZM480-480Z" />
+          </svg>
+        </button>
 
         <button
           type="button"
@@ -1045,35 +1125,159 @@ export default function VLMPage({ initialConfig }: VLMPageProps) {
           aria-label="Toggle low detail mode"
           title="Reduce 3D rendering detail"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 -960 960 960" width="16px" fill="currentColor" aria-hidden="true">
-            <path d="M120-200v-80h240v80H120Zm0-200v-80h480v80H120Zm0-200v-80h720v80H120Z" />
+          <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3" aria-hidden="true">
+            <path d="M480-40q-50 0-85-35t-35-85q0-14 2.5-26.5T371-211L211-372q-12 5-25 8.5t-27 3.5q-50 0-84.5-35T40-480q0-50 34.5-85t84.5-35q39 0 70 22.5t43 57.5h95q9-26 28-44.5t45-27.5v-95q-35-12-57.5-43T360-800q0-50 35-85t85-35q50 0 85 35t35 85q0 14-3 27t-9 25l160 160q12-6 25-9t27-3q50 0 85 35t35 85q0 50-35 85t-85 35q-39 0-70-22.5T687-440h-95q-9 26-27.5 45T520-367v94q35 12 57.5 43t22.5 70q0 50-35 85t-85 35Zm-40-233v-94q-13-5-24-12t-20.5-16.5Q386-405 379-416t-12-24h-95q0 1-.5 2.5l-1 3q-.5 1.5-1 2.5l-1.5 3 29 29q24 24 51 51.5t51 51.5l29 29q2-1 3.5-1.5t3-1.5 3-1.5q1.5-.5 2.5-.5Zm152-247h95q0-2 .5-3.5t1.5-3 1.5-3q.5-1.5 1.5-2.5l-29-29-51-51-51-51-29-29q-1 1-2.5 1.5t-3 1.5-3 1.5q-1.5.5-3.5.5v95q12 4 23.5 11.5T564-564q9 9 16.5 20.5T592-520Zm208 80q17 0 28.5-11.5T840-480q0-17-11.5-28.5T800-520q-17 0-28.5 11.5T760-480q0 17 11.5 28.5T800-440Zm-320 0q17 0 28.5-11.5T520-480q0-17-11.5-28.5T480-520q-17 0-28.5 11.5T440-480q0 17 11.5 28.5T480-440Zm0 320q17 0 28.5-11.5T520-160q0-17-11.5-28.5T480-200q-17 0-28.5 11.5T440-160q0 17 11.5 28.5T480-120ZM160-440q17 0 28.5-11.5T200-480q0-17-11.5-28.5T160-520q-17 0-28.5 11.5T120-480q0 17 11.5 28.5T160-440Zm320-320q17 0 28.5-11.5T520-800q0-17-11.5-28.5T480-840q-17 0-28.5 11.5T440-800q0 17 11.5 28.5T480-760Z" />
           </svg>
-          <span>{isLowDetailMode ? 'Low Detail' : 'Full Detail'}</span>
         </button>
       </section>
+
+      {isDetectionModalOpen ? (
+        <div
+          className="vlm-frame-modal-overlay"
+          role="presentation"
+          onClick={() => setIsDetectionModalOpen(false)}
+        >
+          <div
+            className="vlm-frame-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Detection frame fullscreen"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="vlm-frame-modal-close"
+              aria-label="Close fullscreen detection frame"
+              title="Close"
+              onClick={() => setIsDetectionModalOpen(false)}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" height="22px" viewBox="0 -960 960 960" width="22px" fill="#e3e3e3">
+                <path d="m251.33-203.33-48-48L432-480 203.33-708.67l48-48L480-528l228.67-228.67 48 48L528-480l228.67 228.67-48 48L480-432 251.33-203.33Z"/>
+              </svg>
+            </button>
+            <canvas ref={fullscreenCanvasRef} className="vlm-frame-modal-canvas" />
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
 
-function drawDetections(context: CanvasRenderingContext2D, detections: VLMDetection[]): void {
+function smoothDetections(
+  previous: SmoothedDetection[],
+  incoming: VLMDetection[],
+  nowMs: number
+): SmoothedDetection[] {
+  const matchedPrevious = new Set<number>()
+  const next: SmoothedDetection[] = []
+
+  for (const detection of incoming) {
+    let bestIndex = -1
+    let bestDistance = Number.POSITIVE_INFINITY
+
+    for (let index = 0; index < previous.length; index += 1) {
+      if (matchedPrevious.has(index)) continue
+      const candidate = previous[index]
+      if (candidate.label_id !== detection.label_id) continue
+
+      const distance = detectionCenterDistance(candidate.box, detection.box)
+      if (distance < bestDistance) {
+        bestDistance = distance
+        bestIndex = index
+      }
+    }
+
+    if (bestIndex >= 0 && bestDistance <= 140) {
+      const prior = previous[bestIndex]
+      matchedPrevious.add(bestIndex)
+      const confidence = Math.min(1, prior.confidence * 0.6 + 0.5)
+      next.push({
+        ...detection,
+        box: lerpBox(prior.box, detection.box, 0.45),
+        score: prior.score * 0.35 + detection.score * 0.65,
+        confidence,
+        lastSeenMs: nowMs,
+      })
+      continue
+    }
+
+    next.push({
+      ...detection,
+      confidence: 0.6,
+      lastSeenMs: nowMs,
+    })
+  }
+
+  for (let index = 0; index < previous.length; index += 1) {
+    if (matchedPrevious.has(index)) continue
+    const prior = previous[index]
+    const ageMs = nowMs - prior.lastSeenMs
+    if (ageMs > 650) continue
+    const fade = Math.max(0, 1 - ageMs / 650)
+    const confidence = prior.confidence * 0.72 * fade
+    if (confidence <= 0.08) continue
+    next.push({
+      ...prior,
+      confidence,
+    })
+  }
+
+  return next
+    .sort((a, b) => (b.confidence - a.confidence) || (b.score - a.score))
+    .slice(0, LIVE_INFER_MAX_DETECTIONS)
+}
+
+function detectionCenterDistance(
+  boxA: [number, number, number, number],
+  boxB: [number, number, number, number]
+): number {
+  const centerAX = (boxA[0] + boxA[2]) * 0.5
+  const centerAY = (boxA[1] + boxA[3]) * 0.5
+  const centerBX = (boxB[0] + boxB[2]) * 0.5
+  const centerBY = (boxB[1] + boxB[3]) * 0.5
+  return Math.hypot(centerAX - centerBX, centerAY - centerBY)
+}
+
+function lerpBox(
+  from: [number, number, number, number],
+  to: [number, number, number, number],
+  t: number
+): [number, number, number, number] {
+  const clampedT = Math.min(1, Math.max(0, t))
+  return [
+    from[0] + (to[0] - from[0]) * clampedT,
+    from[1] + (to[1] - from[1]) * clampedT,
+    from[2] + (to[2] - from[2]) * clampedT,
+    from[3] + (to[3] - from[3]) * clampedT,
+  ]
+}
+
+function drawDetections(
+  context: CanvasRenderingContext2D,
+  detections: ReadonlyArray<VLMDetection | SmoothedDetection>
+): void {
   context.lineWidth = 2
   context.font = '15px Space Grotesk'
 
   detections.forEach((detection) => {
+    const confidence = 'confidence' in detection
+      ? Math.min(1, Math.max(0.08, detection.confidence))
+      : 1
     const [x1, y1, x2, y2] = detection.box
     const width = Math.max(1, x2 - x1)
     const height = Math.max(1, y2 - y1)
 
-    context.strokeStyle = '#ffb429'
-    context.fillStyle = 'rgba(255, 180, 41, 0.15)'
+    context.lineWidth = 1.2 + confidence * 1.3
+    context.strokeStyle = `rgba(255, 180, 41, ${0.35 + confidence * 0.6})`
+    context.fillStyle = `rgba(255, 180, 41, ${0.08 + confidence * 0.16})`
     context.strokeRect(x1, y1, width, height)
     context.fillRect(x1, y1, width, height)
 
     const label = `${detection.label} ${(detection.score * 100).toFixed(1)}%`
-    context.fillStyle = 'rgba(0, 0, 0, 0.78)'
+    context.fillStyle = `rgba(0, 0, 0, ${0.68 + confidence * 0.22})`
     const textWidth = context.measureText(label).width
     context.fillRect(x1, Math.max(0, y1 - 22), textWidth + 12, 20)
-    context.fillStyle = '#ffd27a'
+    context.fillStyle = `rgba(255, 210, 122, ${0.72 + confidence * 0.28})`
     context.fillText(label, x1 + 6, Math.max(14, y1 - 7))
   })
 }

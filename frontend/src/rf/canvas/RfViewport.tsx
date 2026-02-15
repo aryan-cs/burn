@@ -3,7 +3,11 @@ import { Canvas } from '@react-three/fiber'
 import { useRFGraphStore } from '../store/rfGraphStore'
 import { RfSceneManager } from './RfSceneManager'
 
-export function RfViewport() {
+interface RfViewportProps {
+  lowDetailMode: boolean
+}
+
+export function RfViewport({ lowDetailMode }: RfViewportProps) {
   const selectNode = useRFGraphStore((state) => state.selectNode)
   const setConnectionSource = useRFGraphStore((state) => state.setConnectionSource)
 
@@ -21,8 +25,8 @@ export function RfViewport() {
         <ambientLight intensity={0.5} />
         <directionalLight position={[10, 12, 8]} intensity={0.9} />
         <pointLight position={[-10, -8, -5]} intensity={0.35} color="#ffb429" />
-        <gridHelper args={[36, 36, '#3b2d14', '#1f1f1f']} />
-        <RfSceneManager />
+        <gridHelper args={lowDetailMode ? [24, 24, '#3b2d14', '#1f1f1f'] : [36, 36, '#3b2d14', '#1f1f1f']} />
+        <RfSceneManager lowDetailMode={lowDetailMode} />
         <OrbitControls
           makeDefault
           enablePan

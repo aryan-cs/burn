@@ -14,6 +14,7 @@ import type {
   RFCompileResponse,
   RFDatasetMeta,
   RFInferResponse,
+  RFNode,
   RFStatusResponse,
   RFTrainResponse,
   RFValidationResponse,
@@ -79,6 +80,8 @@ function toPositiveInt(value: unknown, fallback: number): number {
   return rounded > 0 ? rounded : fallback
 }
 
+const LOW_DETAIL_STORAGE_KEY = 'mlcanvas.rf.low_detail_mode'
+
 export default function RandomForestPage() {
   useRfWebSocket()
 
@@ -116,6 +119,10 @@ export default function RandomForestPage() {
   )
   const [activeTab, setActiveTab] = useState<'build' | 'train' | 'test'>('build')
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
+  const [isLowDetailMode, setIsLowDetailMode] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem(LOW_DETAIL_STORAGE_KEY) === '1'
+  })
 
   const nodes = useMemo(() => Object.values(nodesMap), [nodesMap])
   const inputNode = useMemo(() => nodes.find((node) => node.type === 'RFInput') ?? null, [nodes])
@@ -158,6 +165,11 @@ export default function RandomForestPage() {
       return new Array(featureCount).fill(0)
     })
   }, [featureCount])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(LOW_DETAIL_STORAGE_KEY, isLowDetailMode ? '1' : '0')
+  }, [isLowDetailMode])
 
   useEffect(() => {
     const loadDatasets = async () => {
@@ -374,6 +386,19 @@ export default function RandomForestPage() {
     [addLog, resetRun, setDataset]
   )
 
+  const handleAlign = useCallback(() => {
+    const state = useRFGraphStore.getState()
+    const orderedNodes = Object.values(state.nodes).sort(compareRFNodesForAlignment)
+    if (orderedNodes.length === 0) return
+
+    const spacing = 3.2
+    const centerOffset = ((orderedNodes.length - 1) * spacing) / 2
+    orderedNodes.forEach((node, index) => {
+      state.setNodePosition(node.id, [index * spacing - centerOffset, 0, 0])
+    })
+    state.autoConnectByX()
+  }, [])
+
   return (
     <div className={`app-shell rf-page ${isSidebarCollapsed ? 'app-shell-collapsed' : ''}`}>
       <section className="app-sidebar rf-sidebar">
@@ -522,10 +547,72 @@ export default function RandomForestPage() {
             </svg>
           )}
         </button>
+        <a
+          href="/"
+          className="builder-home-button"
+          aria-label="Go to home"
+          title="Home"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3">
+            <path d="M240-200h120v-240h240v240h120v-360L480-740 240-560v360Zm-80 80v-480l320-240 320 240v480H520v-240h-80v240H160Zm320-350Z" />
+          </svg>
+        </a>
+        <button
+          type="button"
+          onClick={() => setIsLowDetailMode((prev) => !prev)}
+          className={`detail-mode-button ${
+            isLowDetailMode ? 'detail-mode-button-active' : ''
+          }`}
+          aria-pressed={isLowDetailMode}
+          aria-label="Toggle low detail mode"
+          title="Reduce render detail"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            height="24px"
+            viewBox="0 -960 960 960"
+            width="24px"
+            fill="#e3e3e3"
+            aria-hidden="true"
+          >
+            <path d="M480-40q-50 0-85-35t-35-85q0-14 2.5-26.5T371-211L211-372q-12 5-25 8.5t-27 3.5q-50 0-84.5-35T40-480q0-50 34.5-85t84.5-35q39 0 70 22.5t43 57.5h95q9-26 28-44.5t45-27.5v-95q-35-12-57.5-43T360-800q0-50 35-85t85-35q50 0 85 35t35 85q0 14-3 27t-9 25l160 160q12-6 25-9t27-3q50 0 85 35t35 85q0 50-35 85t-85 35q-39 0-70-22.5T687-440h-95q-9 26-27.5 45T520-367v94q35 12 57.5 43t22.5 70q0 50-35 85t-85 35Zm-40-233v-94q-13-5-24-12t-20.5-16.5Q386-405 379-416t-12-24h-95q0 1-.5 2.5l-1 3q-.5 1.5-1 2.5l-1.5 3 29 29q24 24 51 51.5t51 51.5l29 29q2-1 3.5-1.5t3-1.5 3-1.5q1.5-.5 2.5-.5Zm152-247h95q0-2 .5-3.5t1.5-3 1.5-3q.5-1.5 1.5-2.5l-29-29-51-51-51-51-29-29q-1 1-2.5 1.5t-3 1.5-3 1.5q-1.5.5-3.5.5v95q12 4 23.5 11.5T564-564q9 9 16.5 20.5T592-520Zm208 80q17 0 28.5-11.5T840-480q0-17-11.5-28.5T800-520q-17 0-28.5 11.5T760-480q0 17 11.5 28.5T800-440Zm-320 0q17 0 28.5-11.5T520-480q0-17-11.5-28.5T480-520q-17 0-28.5 11.5T440-480q0 17 11.5 28.5T480-440Zm0 320q17 0 28.5-11.5T520-160q0-17-11.5-28.5T480-200q-17 0-28.5 11.5T440-160q0 17 11.5 28.5T480-120ZM160-440q17 0 28.5-11.5T200-480q0-17-11.5-28.5T160-520q-17 0-28.5 11.5T120-480q0 17 11.5 28.5T160-440Zm320-320q17 0 28.5-11.5T520-800q0-17-11.5-28.5T480-840q-17 0-28.5 11.5T440-800q0 17 11.5 28.5T480-760Z" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={handleAlign}
+          aria-label="Align"
+          title="Align"
+          className="align-button"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            height="24px"
+            viewBox="0 -960 960 960"
+            width="24px"
+            fill="#e3e3e3"
+          >
+            <path d="M180-120q-24 0-42-18t-18-42v-172h60v172h172v60H180Zm428 0v-60h172v-172h60v172q0 24-18 42t-42 18H608ZM120-608v-172q0-24 18-42t42-18h172v60H180v172h-60Zm660 0v-172H608v-60h172q24 0 42 18t18 42v172h-60ZM347.5-347.5Q293-402 293-480t54.5-132.5Q402-667 480-667t132.5 54.5Q667-558 667-480t-54.5 132.5Q558-293 480-293t-132.5-54.5Zm223-42Q607-426 607-480t-36.5-90.5Q534-607 480-607t-90.5 36.5Q353-534 353-480t36.5 90.5Q426-353 480-353t90.5-36.5ZM480-480Z" />
+          </svg>
+        </button>
         <div className="rf-builder-layer">
-          <RfGraphView />
+          <RfGraphView lowDetailMode={isLowDetailMode} />
         </div>
       </section>
     </div>
   )
+}
+
+function compareRFNodesForAlignment(left: RFNode, right: RFNode): number {
+  const typeOrderDelta = getRFNodeTypeOrder(left.type) - getRFNodeTypeOrder(right.type)
+  if (typeOrderDelta !== 0) return typeOrderDelta
+  return left.id.localeCompare(right.id)
+}
+
+function getRFNodeTypeOrder(type: RFNode['type']): number {
+  if (type === 'RFInput') return 0
+  if (type === 'RFFlatten') return 1
+  if (type === 'RandomForestClassifier') return 2
+  if (type === 'RFOutput') return 3
+  return 4
 }

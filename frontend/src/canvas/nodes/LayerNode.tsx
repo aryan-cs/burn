@@ -45,10 +45,6 @@ export const LAYER_ROLE_COLORS: Record<LayerRole, string> = {
   output: '#4da3ff',
 }
 
-const NODE_VALUE_LOW_COLOR = new THREE.Color('#ff4747')
-const NODE_VALUE_MID_COLOR = new THREE.Color('#ffffff')
-const NODE_VALUE_HIGH_COLOR = new THREE.Color('#4eff8e')
-
 export const IGNORE_RAYCAST: THREE.Mesh['raycast'] = () => undefined
 
 export function LayerNode3D({
@@ -60,6 +56,7 @@ export function LayerNode3D({
   role: LayerRole
   trainingPulse?: LayerTrainingPulse
 }) {
+  void trainingPulse
   const [hovered, setHovered] = useState(false)
   const isMovingRef = useRef(false)
   const dragDistanceRef = useRef(0)
@@ -94,31 +91,10 @@ export function LayerNode3D({
       : hovered || isConnectionTarget
         ? NODE_OUTLINE_OPACITY_HOVERED
         : NODE_OUTLINE_OPACITY_IDLE
-  const trainingPulseIntensity = trainingPulse?.active
-    ? Math.min(1, Math.max(0, trainingPulse.intensity))
-    : 0
-  const trainingValue = clampSigned(trainingPulse?.value ?? 0)
-  const trainingPhase = trainingPulse?.phase ?? null
-  const valueTint = useMemo(() => getValueTintHex(trainingValue), [trainingValue])
-  const backwardPhaseBoost = trainingPhase === 'backward' ? 0.14 : 0
-  const coreEmissiveIntensity = Math.max(
+  const coreEmissiveIntensity =
     isSelected || isDragging || isHighlighted || hovered
       ? NODE_CORE_EMISSIVE_INTENSITY_ACTIVE
-      : NODE_CORE_EMISSIVE_INTENSITY_IDLE,
-    NODE_CORE_EMISSIVE_INTENSITY_IDLE +
-      trainingPulseIntensity * 0.38 +
-      Math.abs(trainingValue) * 0.28 +
-      backwardPhaseBoost
-  )
-  const pulsedOutlineOpacity = Math.min(
-    NODE_OUTLINE_OPACITY_SELECTED,
-    Math.max(
-      outlineOpacity,
-      NODE_OUTLINE_OPACITY_IDLE +
-        trainingPulseIntensity * 0.36 +
-        backwardPhaseBoost * 0.5
-    )
-  )
+      : NODE_CORE_EMISSIVE_INTENSITY_IDLE
 
   const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
     if (e.button !== DRAG_MOUSE_BUTTON) return
@@ -224,7 +200,7 @@ export function LayerNode3D({
             />
             <meshStandardMaterial
               color={NODE_CORE_COLOR}
-              emissive={trainingPulse ? valueTint : NODE_CORE_EMISSIVE_COLOR}
+              emissive={NODE_CORE_EMISSIVE_COLOR}
               emissiveIntensity={coreEmissiveIntensity}
               roughness={NODE_CORE_ROUGHNESS}
               metalness={NODE_CORE_METALNESS}
@@ -241,7 +217,7 @@ export function LayerNode3D({
             <meshBasicMaterial
               color={baseColor}
               transparent
-              opacity={pulsedOutlineOpacity}
+              opacity={outlineOpacity}
               side={NODE_OUTLINE_SIDE}
               depthWrite={NODE_OUTLINE_DEPTH_WRITE}
             />
@@ -261,19 +237,4 @@ function getSphereSegments(nodeCount: number): number {
   if (nodeCount >= 250) return 10
   if (nodeCount >= 120) return 14
   return NODE_SPHERE_WIDTH_SEGMENTS
-}
-
-function clampSigned(value: number): number {
-  return Math.min(1, Math.max(-1, value))
-}
-
-function getValueTintHex(value: number): string {
-  const clamped = clampSigned(value)
-  const color = NODE_VALUE_MID_COLOR.clone()
-  if (clamped >= 0) {
-    color.lerp(NODE_VALUE_HIGH_COLOR, clamped)
-  } else {
-    color.lerp(NODE_VALUE_LOW_COLOR, Math.abs(clamped))
-  }
-  return `#${color.getHexString()}`
 }

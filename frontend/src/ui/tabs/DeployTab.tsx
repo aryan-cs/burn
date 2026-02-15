@@ -16,8 +16,8 @@ interface DeployTabProps {
   trainingJobId: string | null
   trainingStatus: string
   deployment: DeploymentView | null
-  deployTarget: 'local' | 'modal'
-  onDeployTargetChange: (target: 'local' | 'modal') => void
+  deployTarget: 'local' | 'modal' | 'sandbox'
+  onDeployTargetChange: (target: 'local' | 'modal' | 'sandbox') => void
   deployTopPrediction: number | null
   deployOutput: string
   onDeployModel: () => void
@@ -62,7 +62,8 @@ export function DeployTab({
   const endpointLiteral = endpointUrl
     ? toPythonSingleQuotedString(endpointUrl)
     : "'http://127.0.0.1:8000/api/deploy/<deployment_id>/infer'"
-  const needsDeploymentIdInPayload = deployment?.target === 'modal'
+  const needsDeploymentIdInPayload =
+    deployment?.target === 'modal' || deployment?.target === 'sandbox'
   const deploymentIdLiteral = deployment?.deployment_id
     ? toPythonSingleQuotedString(deployment.deployment_id)
     : "'<deployment_id>'"
@@ -137,6 +138,13 @@ export function DeployTab({
               className={`btn btn-ghost ${deployTarget === 'modal' ? 'deploy-target-active' : ''}`}
             >
               Modal
+            </button>
+            <button
+              type="button"
+              onClick={() => onDeployTargetChange('sandbox')}
+              className={`btn btn-ghost ${deployTarget === 'sandbox' ? 'deploy-target-active' : ''}`}
+            >
+              Modal Sandbox
             </button>
           </div>
         </div>

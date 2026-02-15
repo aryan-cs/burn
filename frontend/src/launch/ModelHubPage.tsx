@@ -399,10 +399,9 @@ export default function ModelHubPage() {
         <div className="hub-header-top">
           <div className="hub-hero-copy">
             <div className="hub-kicker">Build, Tweak, Deploy.</div>
-            <h1 className="hub-title">From first model to live endpoint in one clean workspace.</h1>
+            <h1 className="hub-title">Welcome back, Aryan.</h1>
             <p className="hub-subtitle">
-              Burn helps teams prototype, train, test, and deploy faster with visual model builders
-              and production-ready deployment workflows.
+              Jump back in with Burn and learn what's next about Neural Networks.
             </p>
             <div className="hub-hero-actions">
               <a href="/nn?mode=scratch" className="hub-cta-button hub-cta-button-primary">
@@ -412,27 +411,27 @@ export default function ModelHubPage() {
                 Open Deployments
               </a>
             </div>
-            <div className="hub-hero-notes">
+            {/* <div className="hub-hero-notes">
               <span>Digits NN preset runs out-of-the-box with sklearn data.</span>
               <span>VLM includes live camera testing with YOLOS-Tiny.</span>
-            </div>
+            </div> */}
           </div>
           <aside className="hub-hero-metrics" aria-label="Workspace quick stats">
             <div className="hub-hero-metric">
-              <span>Scratch Builders</span>
-              <strong>{launchableScratchCount}</strong>
+              <span>Daily Learning Streak</span>
+              <strong>4 days</strong>
             </div>
             <div className="hub-hero-metric">
-              <span>Launchable Presets</span>
-              <strong>{launchablePresetCount}</strong>
+              <span>Latest Module Progress</span>
+              <strong>23% finished</strong>
             </div>
             <div className="hub-hero-metric">
-              <span>Model Families</span>
-              <strong>{activeFamilies}</strong>
+              <span>Upcoming Practice Sets</span>
+              <strong>6 questions remaining</strong>
             </div>
           </aside>
         </div>
-        <p className="hub-subtitle">
+        {/* <p className="hub-subtitle">
           Burn simplifies the process of building machine models from scratch, allowing anyone to
           harness the power of machine learning. Whether you're a student building their first
           classifier or a business designing an end-to-end demand forecasting engine, Burn is there
@@ -451,7 +450,7 @@ export default function ModelHubPage() {
             Deployment Manager
           </a>
           .
-        </p>
+        </p> */}
       </header>
 
       {/* Floating AI FAB (above settings) */}

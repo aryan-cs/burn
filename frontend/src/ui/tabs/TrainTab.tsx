@@ -1,5 +1,6 @@
 import { MetricLineChart } from './Metrics'
 import { LossSurfaceGraph } from './LossSurfaceGraph'
+import type { LossLandscapeData } from '../../store/trainingStore'
 
 const TRAIN_ACC_COLOR = '#ffb429'
 const TRAIN_LOSS_COLOR = '#ffd89c'
@@ -43,6 +44,7 @@ interface TrainTabProps {
   testLossSeries: number[]
   trainAccuracySeries: number[]
   testAccuracySeries: number[]
+  lossLandscape: LossLandscapeData | null
   isTraining: boolean
   onStopModel: () => void
   stopDisabled: boolean
@@ -72,6 +74,7 @@ export function TrainTab({
   testLossSeries,
   trainAccuracySeries,
   testAccuracySeries,
+  lossLandscape,
   isTraining,
   onStopModel,
   stopDisabled,
@@ -97,7 +100,7 @@ export function TrainTab({
           latestTestAccuracy={latestTestAccuracy}
           currentEpoch={currentEpoch}
           totalEpochs={trainingConfig.epochs}
-          optimizer={trainingConfig.optimizer}
+          lossLandscape={lossLandscape}
         />
       </section>
 
@@ -113,6 +116,7 @@ export function TrainTab({
             >
               <option value="mnist">MNIST</option>
               <option value="digits">Digits (8x8)</option>
+              <option value="cats_vs_dogs">Cats vs Dogs (Kaggle, 96x96)</option>
             </select>
           </label>
 
@@ -125,7 +129,7 @@ export function TrainTab({
               className="config-control"
             >
               <option value="local">Local</option>
-              <option value="cloud">Cloud</option>
+              <option value="cloud">Modal</option>
             </select>
           </label>
 
@@ -237,7 +241,7 @@ interface TrainGraphsBlockProps {
   latestTestAccuracy: number | null
   currentEpoch: number
   totalEpochs: number
-  optimizer: string
+  lossLandscape: LossLandscapeData | null
 }
 
 function TrainGraphsBlock({
@@ -252,9 +256,8 @@ function TrainGraphsBlock({
   latestTestAccuracy,
   currentEpoch,
   totalEpochs,
-  optimizer,
+  lossLandscape,
 }: TrainGraphsBlockProps) {
-  const lossSeries = trainLossSeries.length > 0 ? trainLossSeries : testLossSeries
   const trainChartBounds = getChartBounds(trainAccuracySeries, trainLossSeries)
   const testChartBounds = getChartBounds(testAccuracySeries, testLossSeries)
 
@@ -329,8 +332,7 @@ function TrainGraphsBlock({
         <h3 className="panel-subtitle">Loss Landscape</h3>
         <div className="panel-chart">
           <LossSurfaceGraph
-            lossValues={lossSeries}
-            optimizer={optimizer}
+            landscape={lossLandscape}
             currentEpoch={currentEpoch}
             totalEpochs={totalEpochs}
             topology={lossLandscapeTopology}

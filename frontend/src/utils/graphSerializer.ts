@@ -99,6 +99,14 @@ function toPositiveInt(value: unknown, fallback: number): number {
   return Math.floor(parsed)
 }
 
+function toNonNegativeInt(value: unknown, fallback: number): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return fallback
+  }
+  return Math.floor(parsed)
+}
+
 function getNodeUnitCount(
   node: LayerNode | null | undefined,
   fallback = DEFAULT_OUTPUT_CLASSES
@@ -137,6 +145,25 @@ function toBackendNode(node: LayerNode): BackendNode {
       node.config.activation,
       DEFAULT_HIDDEN_ACTIVATION
     )
+  }
+
+  if (node.type === 'Conv2D') {
+    config.filters = toPositiveInt(node.config.filters, 64)
+    config.kernel_size = toPositiveInt(node.config.kernel_size, 3)
+    config.stride = toPositiveInt(node.config.stride, 1)
+    config.padding = toNonNegativeInt(node.config.padding, 0)
+    config.activation = toActivationOrFallback(
+      node.config.activation,
+      DEFAULT_HIDDEN_ACTIVATION
+    )
+  }
+
+  if (node.type === 'MaxPool2D') {
+    const kernel = toPositiveInt(node.config.kernel_size, 2)
+    const stride = toPositiveInt(node.config.stride, kernel)
+    config.kernel_size = kernel
+    config.stride = stride
+    config.padding = toNonNegativeInt(node.config.padding, 0)
   }
 
   if (node.type === 'Dropout') {

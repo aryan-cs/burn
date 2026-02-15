@@ -115,6 +115,55 @@ def _infer_output_shape(node_type: LayerType, config: dict[str, Any], input_shap
             raise ValueError("Dense.units must be a positive integer")
         return [units]
 
+    if node_type == LayerType.CONV2D:
+        if len(input_shape) != 3:
+            raise ValueError("Conv2D requires rank-3 input [channels, height, width]")
+        in_channels, in_height, in_width = input_shape
+        filters = config.get("filters")
+        kernel_size = config.get("kernel_size")
+        stride = config.get("stride", 1)
+        padding = config.get("padding", 0)
+
+        if not isinstance(filters, int) or filters <= 0:
+            raise ValueError("Conv2D.filters must be a positive integer")
+        if not isinstance(kernel_size, int) or kernel_size <= 0:
+            raise ValueError("Conv2D.kernel_size must be a positive integer")
+        if not isinstance(stride, int) or stride <= 0:
+            raise ValueError("Conv2D.stride must be a positive integer")
+        if not isinstance(padding, int) or padding < 0:
+            raise ValueError("Conv2D.padding must be a non-negative integer")
+
+        out_height = ((in_height + 2 * padding - kernel_size) // stride) + 1
+        out_width = ((in_width + 2 * padding - kernel_size) // stride) + 1
+        if out_height <= 0 or out_width <= 0:
+            raise ValueError(
+                "Conv2D produced non-positive spatial output; adjust kernel/stride/padding"
+            )
+        return [filters, out_height, out_width]
+
+    if node_type == LayerType.MAXPOOL2D:
+        if len(input_shape) != 3:
+            raise ValueError("MaxPool2D requires rank-3 input [channels, height, width]")
+        channels, in_height, in_width = input_shape
+        kernel_size = config.get("kernel_size")
+        stride = config.get("stride", kernel_size)
+        padding = config.get("padding", 0)
+
+        if not isinstance(kernel_size, int) or kernel_size <= 0:
+            raise ValueError("MaxPool2D.kernel_size must be a positive integer")
+        if not isinstance(stride, int) or stride <= 0:
+            raise ValueError("MaxPool2D.stride must be a positive integer")
+        if not isinstance(padding, int) or padding < 0:
+            raise ValueError("MaxPool2D.padding must be a non-negative integer")
+
+        out_height = ((in_height + 2 * padding - kernel_size) // stride) + 1
+        out_width = ((in_width + 2 * padding - kernel_size) // stride) + 1
+        if out_height <= 0 or out_width <= 0:
+            raise ValueError(
+                "MaxPool2D produced non-positive spatial output; adjust kernel/stride/padding"
+            )
+        return [channels, out_height, out_width]
+
     if node_type == LayerType.DROPOUT:
         rate = config.get("rate", 0.5)
         if not isinstance(rate, (int, float)):

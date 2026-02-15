@@ -1,4 +1,6 @@
 import type { LayerRole } from '../../utils/graphOrder'
+import { InfoTooltip } from '../InfoTooltip'
+import { FIELD_TOOLTIPS } from '../tooltipData'
 import { MetricTile } from './Metrics'
 
 export interface BuildLayerItem {
@@ -16,38 +18,55 @@ interface BuildTabProps {
   isEditingName: boolean
   draftName: string
   selectedDisplayName: string
+
   selectedRows: number
   selectedCols: number
+
+  // Extra editable fields
+  selectedChannels: number
   selectedUnits: number
   selectedDropoutRate: number
   selectedOutputClasses: number
+
   selectedActivation: string
   selectedShapeLabel: string
+
   canEditSize: boolean
   sizeFieldLabel: string
+
   canEditActivation: boolean
+  canEditChannels: boolean
   canEditUnits: boolean
   canEditDropoutRate: boolean
   canEditOutputClasses: boolean
+
   activationOptions: string[]
+
   layerCount: number
   neuronCount: number
   weightCount: number
   biasCount: number
   layerTypeSummary: string
   sharedNonOutputActivation: string
+
   onAddLayer: () => void
   onSelectLayer: (nodeId: string) => void
+
   onBeginNameEdit: () => void
   onDraftNameChange: (value: string) => void
   onNameCommit: () => void
   onNameCancel: () => void
+
   onRowsChange: (value: string) => void
   onColsChange: (value: string) => void
+
+  onChannelsChange: (value: string) => void
   onUnitsChange: (value: string) => void
   onDropoutRateChange: (value: string) => void
   onOutputClassesChange: (value: string) => void
+
   onActivationChange: (value: string) => void
+
   onValidate: () => void
   buildStatus: 'idle' | 'success' | 'error'
   buildStatusMessage: string
@@ -67,6 +86,7 @@ export function BuildTab({
   selectedDisplayName,
   selectedRows,
   selectedCols,
+  selectedChannels,
   selectedUnits,
   selectedDropoutRate,
   selectedOutputClasses,
@@ -75,6 +95,7 @@ export function BuildTab({
   canEditSize,
   sizeFieldLabel,
   canEditActivation,
+  canEditChannels,
   canEditUnits,
   canEditDropoutRate,
   canEditOutputClasses,
@@ -93,6 +114,7 @@ export function BuildTab({
   onNameCancel,
   onRowsChange,
   onColsChange,
+  onChannelsChange,
   onUnitsChange,
   onDropoutRateChange,
   onOutputClassesChange,
@@ -174,20 +196,22 @@ export function BuildTab({
                 className="layer-name-input"
               />
             ) : (
-              <button
-                type="button"
-                onClick={onBeginNameEdit}
-                className="layer-name-button"
-              >
+              <button type="button" onClick={onBeginNameEdit} className="layer-name-button">
                 {selectedDisplayName}
               </button>
             )}
           </div>
+
           <p className="panel-muted-text panel-muted-text-tight">Type: {selectedNodeType ?? '—'}</p>
+
           <div className="layer-editor-fields-row">
             {canEditSize ? (
               <div className="field-group field-group-inline field-group-size">
-                <p className="field-label">{sizeFieldLabel}</p>
+                <p className="field-label">
+                  {sizeFieldLabel}
+                  <InfoTooltip title="Size" text={FIELD_TOOLTIPS.Size} position="top" />
+                </p>
+
                 <div className="field-size-row">
                   <input
                     type="number"
@@ -212,20 +236,17 @@ export function BuildTab({
                 <div className="field-readonly">{selectedShapeLabel}</div>
               </div>
             )}
-            <span
-              aria-hidden
-              className="layer-editor-divider"
-            />
+
+            <span aria-hidden className="layer-editor-divider" />
 
             <div className="field-group field-group-inline field-group-activation">
               {canEditActivation ? (
                 <>
-                  <label
-                    htmlFor="layer-activation"
-                    className="field-label"
-                  >
+                  <label htmlFor="layer-activation" className="field-label">
                     Activation
+                    <InfoTooltip title="Activation" text={FIELD_TOOLTIPS.Activation} position="top" />
                   </label>
+
                   <select
                     id="layer-activation"
                     value={selectedActivation}
@@ -247,8 +268,22 @@ export function BuildTab({
               )}
             </div>
           </div>
-          {(canEditUnits || canEditDropoutRate || canEditOutputClasses) ? (
+
+          {canEditChannels || canEditUnits || canEditDropoutRate || canEditOutputClasses ? (
             <div className="layer-editor-extra-grid">
+              {canEditChannels ? (
+                <label className="field-group field-group-inline">
+                  <span className="field-label">Channels</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={selectedChannels}
+                    onChange={(event) => onChannelsChange(event.target.value)}
+                    className="size-input"
+                  />
+                </label>
+              ) : null}
+
               {canEditUnits ? (
                 <label className="field-group field-group-inline">
                   <span className="field-label">Units</span>
@@ -296,14 +331,19 @@ export function BuildTab({
 
       <section className="panel-card build-summary-card">
         <div className="summary-grid">
-          <MetricTile label="Layers" value={String(layerCount)} />
-          <MetricTile label="Neurons" value={String(neuronCount)} />
-          <MetricTile label="Weights" value={String(weightCount)} />
-          <MetricTile label="Biases" value={String(biasCount)} />
-          <MetricTile label="Layer Type" value={layerTypeSummary} />
+          <MetricTile label="Layers" value={String(layerCount)} tooltip={FIELD_TOOLTIPS.Layers} />
+          <MetricTile label="Neurons" value={String(neuronCount)} tooltip={FIELD_TOOLTIPS.Neurons} />
+          <MetricTile label="Weights" value={String(weightCount)} tooltip={FIELD_TOOLTIPS.Weights} />
+          <MetricTile label="Biases" value={String(biasCount)} tooltip={FIELD_TOOLTIPS.Biases} />
+          <MetricTile
+            label="Layer Type"
+            value={layerTypeSummary}
+            tooltip={FIELD_TOOLTIPS['Layer Type']}
+          />
           <MetricTile
             label="Shared Activation Function"
             value={formatActivationLabel(sharedNonOutputActivation)}
+            tooltip={FIELD_TOOLTIPS['Shared Activation Function']}
           />
         </div>
       </section>
@@ -335,11 +375,7 @@ export function BuildTab({
       </section>
 
       <div className="panel-actions">
-        <button
-          onClick={onValidate}
-          disabled={validateDisabled}
-          className="btn btn-validate"
-        >
+        <button onClick={onValidate} disabled={validateDisabled} className="btn btn-validate">
           {validateLabel}
         </button>
       </div>

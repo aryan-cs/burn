@@ -260,6 +260,7 @@ export function SceneManager({ lowDetailMode }: SceneManagerProps) {
           node={node}
           role={nodeRoles.get(node.id) ?? 'hidden'}
           trainingPulse={trainingPulseByNodeId.get(node.id)}
+          lowDetailMode={lowDetailMode}
         />
       ))}
 

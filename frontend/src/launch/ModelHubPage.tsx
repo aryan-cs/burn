@@ -198,6 +198,15 @@ const PRESET_CARDS: LaunchCard[] = [
     tone: 'nn',
   },
   {
+    title: 'AlexNet Cats vs Dogs',
+    subtitle: 'Preset Project',
+    description:
+      'True AlexNet stack (conv/pool/fc) trained on Kaggle Cats vs Dogs at 96x96.',
+    href: '/nn?mode=preset&template=alexnet_cats_dogs',
+    badge: NN,
+    tone: 'nn',
+  },
+  {
     title: 'Iris RF Classifier',
     subtitle: 'Preset Project',
     description: 'Classic low-dimensional classification with RandomForestClassifier.',
@@ -387,6 +396,13 @@ export default function ModelHubPage() {
           harness the power of machine learning. Whether you're a student building their first
           classifier or a business designing an end-to-end demand forecasting engine, Burn is there
           to help.
+        </p>
+        <p className="hub-subtitle">
+          New: the Digits NN preset uses the built-in sklearn dataset and works without Kaggle setup.
+        </p>
+        <p className="hub-subtitle">
+          VLM projects use Hugging Face object-detection models (default: YOLOS-Tiny) and include a
+          camera testing interface.
         </p>
         <p className="hub-subtitle">
           Need to manage live model endpoints later? Open{' '}

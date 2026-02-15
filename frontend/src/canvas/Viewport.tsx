@@ -80,6 +80,8 @@ export function Viewport({ lowDetailMode }: ViewportProps) {
         camera={{ position: [0, 5, 12], fov: 50 }}
         style={{ width: '100%', height: '100%' }}
         onPointerMissed={handlePointerMissed}
+        dpr={lowDetailMode ? [0.75, 1] : [1, 1.5]}
+        gl={{ antialias: !lowDetailMode, powerPreference: 'high-performance' }}
       >
         <color attach="background" args={['#000000']} />
         <ambientLight intensity={0.4} />

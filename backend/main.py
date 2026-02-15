@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
 from routers.deploy import router as deploy_router
 from routers.datasets import router as datasets_router
@@ -15,6 +16,11 @@ from routers.rf_websocket import router as rf_websocket_router
 from routers.vlm_model import router as vlm_model_router
 from routers.vlm_websocket import router as vlm_websocket_router
 from routers.websocket import router as websocket_router
+from routers.ml_model import router as ml_model_router
+from routers.ml_websocket import router as ml_ws_router
+from routers.ai_coach import router as ai_coach_router
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 
 @asynccontextmanager
@@ -38,6 +44,9 @@ app.include_router(model_router)
 app.include_router(deploy_router)
 app.include_router(datasets_router)
 app.include_router(websocket_router)
+app.include_router(ml_model_router)
+app.include_router(ml_ws_router)
+app.include_router(ai_coach_router)
 app.include_router(rf_model_router)
 app.include_router(rf_datasets_router)
 app.include_router(rf_websocket_router)

@@ -354,7 +354,7 @@ export default function DeploymentsPage() {
                     <div><span>Deployment ID</span><code>{selected.deployment_id}</code></div>
                     <div><span>Job ID</span><code>{selected.job_id}</code></div>
                     <div><span>Status</span><code>{selected.status}</code></div>
-                    <div><span>Target</span><code>{selected.target}</code></div>
+                    <div><span>Target</span><code>{formatDeploymentTarget(selected.target)}</code></div>
                     <div><span>Model Family</span><code>{getModelFamilyLabel(selected.model_family)}</code></div>
                     <div><span>Endpoint</span><code>{selected.endpoint_path}</code></div>
                     <div><span>Requests</span><code>{selected.request_count}</code></div>
@@ -433,6 +433,12 @@ function getModelFamilyLabel(modelFamily: string | undefined): string {
   if (normalized === 'linreg') return 'Linear Regression'
   if (normalized === 'nn') return 'Neural Network'
   return normalized.toUpperCase()
+}
+
+function formatDeploymentTarget(target: string | undefined): string {
+  const normalized = (target ?? '').trim().toLowerCase()
+  if (normalized === 'cloud') return 'modal'
+  return normalized || 'local'
 }
 
 function isNnDeployment(deployment: DeploymentInfo): boolean {

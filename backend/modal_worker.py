@@ -23,6 +23,8 @@ PROGRESS_DICT_NAME = "burn-training-progress"
 progress_store = modal.Dict.from_name(PROGRESS_DICT_NAME, create_if_missing=True)
 DEPLOYMENT_DICT_NAME = "burn-modal-deployments"
 deployment_store = modal.Dict.from_name(DEPLOYMENT_DICT_NAME, create_if_missing=True)
+SANDBOX_DEPLOYMENT_DICT_NAME = "burn-modal-sandbox-deployments"
+sandbox_deployment_store = modal.Dict.from_name(SANDBOX_DEPLOYMENT_DICT_NAME, create_if_missing=True)
 image = modal.Image.debian_slim().pip_install(
     "fastapi[standard]>=0.115.0",
     "kaggle>=2.0.0",
@@ -104,6 +106,22 @@ def _to_inference_tensor(raw_inputs: Any, expected_shape: list[int] | None) -> t
 
     expected_rank = len(expected_shape)
     expected_elems = math.prod(expected_shape)
+    expected_channels = int(expected_shape[0]) if expected_rank >= 3 else None
+    # Accept shorthand image payloads:
+    # [H, W] -> [C, H, W] (repeat channel if needed) before adding batch.
+    if expected_rank == 3 and tensor.ndim == 2 and list(tensor.shape) == expected_shape[1:]:
+        tensor = tensor.unsqueeze(0)
+        if expected_channels and expected_channels > 1:
+            tensor = tensor.repeat(expected_channels, 1, 1)
+    if (
+        expected_rank == 3
+        and tensor.ndim == 3
+        and tensor.shape[0] == 1
+        and expected_channels
+        and expected_channels > 1
+        and list(tensor.shape[1:]) == expected_shape[1:]
+    ):
+        tensor = tensor.repeat(expected_channels, 1, 1)
     if tensor.ndim == expected_rank:
         return tensor.unsqueeze(0)
     if tensor.ndim == expected_rank + 1:
@@ -117,8 +135,8 @@ def _to_inference_tensor(raw_inputs: Any, expected_shape: list[int] | None) -> t
     )
 
 
-def _load_deployed_model(deployment_id: str):
-    payload = deployment_store.get(deployment_id)
+def _load_deployed_model_from_store(deployment_id: str, store: modal.Dict):
+    payload = store.get(deployment_id)
     if not isinstance(payload, dict):
         raise ValueError(f"Unknown modal deployment_id: {deployment_id}")
 
@@ -130,12 +148,12 @@ def _load_deployed_model(deployment_id: str):
         raise ValueError("Invalid deployment graph payload")
     if not isinstance(training_payload, dict):
         raise ValueError("Invalid deployment training payload")
-    if not isinstance(state_dict_b64, str):
-        raise ValueError("Invalid deployment model payload")
 
     graph = GraphSpec.model_validate(graph_payload)
     training = normalize_training_config(training_payload)
     compiled = compile_graph(graph, training)
+    if not isinstance(state_dict_b64, str):
+        raise ValueError("Invalid deployment model payload")
     state_dict = torch.load(io.BytesIO(base64.b64decode(state_dict_b64.encode("ascii"))), map_location="cpu")
     inner_state_dict = {
         (k[len("_orig_mod.") :] if isinstance(k, str) and k.startswith("_orig_mod.") else k): v
@@ -148,6 +166,32 @@ def _load_deployed_model(deployment_id: str):
     if isinstance(input_shape, list):
         normalized_input_shape = [int(v) for v in input_shape]
     return compiled.model, normalized_input_shape
+
+
+def _infer_deployment_payload(payload: dict[str, Any], store: modal.Dict) -> dict[str, Any]:
+    deployment_id = str(payload.get("deployment_id", "")).strip()
+    if not deployment_id:
+        raise ValueError("deployment_id is required")
+    raw_inputs = payload.get("inputs")
+    return_probabilities = bool(payload.get("return_probabilities", True))
+    model, input_shape = _load_deployed_model_from_store(deployment_id, store)
+    input_tensor = _to_inference_tensor(raw_inputs, input_shape)
+    with torch.no_grad():
+        output = model(input_tensor)
+    if output.ndim == 1:
+        output = output.unsqueeze(0)
+    logits = output.detach().cpu()
+    response: dict[str, Any] = {
+        "deployment_id": deployment_id,
+        "input_shape": list(input_tensor.shape),
+        "output_shape": list(logits.shape),
+        "logits": logits.tolist(),
+    }
+    if logits.ndim == 2:
+        response["predictions"] = logits.argmax(dim=1).tolist()
+        if return_probabilities:
+            response["probabilities"] = torch.softmax(logits, dim=1).tolist()
+    return response
 
 
 def _evaluate_model(
@@ -218,6 +262,8 @@ def train_job_remote(
     print(f"[modal][train_job_remote] device={device}", flush=True)
     if device.type == "cuda":
         torch.backends.cudnn.benchmark = True
+        # Enable TF32 path for float32 matmuls on Ampere+ GPUs (e.g. H100).
+        torch.set_float32_matmul_precision("high")
 
     use_amp = device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
@@ -226,6 +272,8 @@ def train_job_remote(
     max_train_batches = max(0, int(os.getenv("MODAL_MAX_TRAIN_BATCHES", "0")))
     max_test_batches = max(0, int(os.getenv("MODAL_MAX_TEST_BATCHES", "0")))
     batch_multiplier = max(1, int(os.getenv("MODAL_BATCH_SIZE_MULTIPLIER", "1")))
+    progress_every_batches = max(1, int(os.getenv("MODAL_PROGRESS_EVERY_BATCHES", "20")))
+    max_progress_points = max(128, int(os.getenv("MODAL_MAX_PROGRESS_POINTS", "512")))
     effective_batch_size = int(training.batch_size) * batch_multiplier
     if use_compile:
         try:
@@ -260,6 +308,7 @@ def train_job_remote(
         correct = 0
         total = 0
         steps = 0
+        total_train_steps = max(1, len(train_loader))
 
         for batch_x, batch_y in train_loader:
             batch_x = batch_x.to(device)
@@ -282,6 +331,36 @@ def train_job_remote(
             correct += int((output.argmax(1) == batch_y).sum().item())
             total += int(batch_y.size(0))
             steps += 1
+
+            if steps % progress_every_batches == 0:
+                interim_train_loss = running_loss / max(steps, 1)
+                interim_train_accuracy = correct / max(total, 1)
+                interim_test_loss = last_test_loss if last_test_loss > 0 else interim_train_loss
+                interim_test_accuracy = (
+                    last_test_accuracy if last_test_accuracy > 0 else interim_train_accuracy
+                )
+                interim_epoch = float(epoch + min(0.999, steps / total_train_steps))
+                metrics.append(
+                    {
+                        "epoch": interim_epoch,
+                        "train_loss": interim_train_loss,
+                        "train_accuracy": interim_train_accuracy,
+                        "test_loss": interim_test_loss,
+                        "test_accuracy": interim_test_accuracy,
+                    }
+                )
+                if len(metrics) > max_progress_points:
+                    del metrics[:-max_progress_points]
+                _publish_progress(
+                    job_id,
+                    {
+                        "status": "running",
+                        "epoch_metrics": metrics,
+                        "final_metrics": None,
+                        "error": None,
+                    },
+                )
+
             if max_train_batches > 0 and steps >= max_train_batches:
                 break
 
@@ -310,6 +389,8 @@ def train_job_remote(
                 "test_accuracy": last_test_accuracy,
             }
         )
+        if len(metrics) > max_progress_points:
+            del metrics[:-max_progress_points]
         print(
             (
                 f"[modal][train_job_remote] epoch={epoch + 1}/{training.epochs} "
@@ -399,26 +480,38 @@ def unregister_deployment_remote(deployment_id: str) -> dict[str, Any]:
 @app.function(image=image, timeout=60)
 @modal.fastapi_endpoint(method="POST")
 def infer_deployment_remote(payload: dict[str, Any]) -> dict[str, Any]:
-    deployment_id = str(payload.get("deployment_id", "")).strip()
+    return _infer_deployment_payload(payload, deployment_store)
+
+
+@app.function(image=image, timeout=60 * 5)
+def register_sandbox_deployment_remote(
+    deployment_id: str,
+    graph_payload: dict[str, Any],
+    training_payload: dict[str, Any],
+    state_dict_b64: str,
+    input_shape: list[int] | None = None,
+) -> dict[str, Any]:
     if not deployment_id:
         raise ValueError("deployment_id is required")
-    raw_inputs = payload.get("inputs")
-    return_probabilities = bool(payload.get("return_probabilities", True))
-    model, input_shape = _load_deployed_model(deployment_id)
-    input_tensor = _to_inference_tensor(raw_inputs, input_shape)
-    with torch.no_grad():
-        output = model(input_tensor)
-    if output.ndim == 1:
-        output = output.unsqueeze(0)
-    logits = output.detach().cpu()
-    response: dict[str, Any] = {
-        "deployment_id": deployment_id,
-        "input_shape": list(input_tensor.shape),
-        "output_shape": list(logits.shape),
-        "logits": logits.tolist(),
+    sandbox_deployment_store[deployment_id] = {
+        "graph_payload": graph_payload,
+        "training_payload": training_payload,
+        "state_dict_b64": state_dict_b64,
+        "input_shape": input_shape,
     }
-    if logits.ndim == 2:
-        response["predictions"] = logits.argmax(dim=1).tolist()
-        if return_probabilities:
-            response["probabilities"] = torch.softmax(logits, dim=1).tolist()
-    return response
+    return {"deployment_id": deployment_id, "status": "ready"}
+
+
+@app.function(image=image, timeout=60)
+def unregister_sandbox_deployment_remote(deployment_id: str) -> dict[str, Any]:
+    try:
+        del sandbox_deployment_store[deployment_id]
+    except KeyError:
+        pass
+    return {"deployment_id": deployment_id, "status": "deleted"}
+
+
+@app.function(image=image, timeout=60)
+@modal.fastapi_endpoint(method="POST")
+def infer_sandbox_deployment_remote(payload: dict[str, Any]) -> dict[str, Any]:
+    return _infer_deployment_payload(payload, sandbox_deployment_store)

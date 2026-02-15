@@ -22,6 +22,20 @@ DATASET_REGISTRY: list[dict[str, Any]] = [
         "num_classes": 10,
         "source": "sklearn",
         "loader": "sklearn_digits",
+    },
+    {
+        "id": "cats_vs_dogs",
+        "name": "Cats vs Dogs (Kaggle, 96x96)",
+        "task": "classification",
+        "input_shape": [3, 96, 96],
+        "num_classes": 2,
+        "source": "kaggle",
+        "kaggle_dataset_candidates": [
+            "karakaggle/kaggle-cat-vs-dog-dataset",
+            "tongpython/cat-and-dog",
+            "shaunthesheep/microsoft-catsvsdogs-dataset",
+        ],
+        "loader": "kaggle_cats_vs_dogs",
     }
 ]
 

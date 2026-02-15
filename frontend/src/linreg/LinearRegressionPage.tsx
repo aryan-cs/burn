@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { MetricLineChart, MetricTile } from '../ui/tabs/Metrics'
 import {
   getLinearRegressionDataset,
@@ -11,6 +11,7 @@ type BuildStatus = 'idle' | 'success' | 'error'
 type TrainingStatus = 'idle' | 'training' | 'complete' | 'stopped' | 'error'
 type LayerRole = 'input' | 'hidden' | 'output'
 type LinRegNodeType = 'Input' | 'Normalize' | 'LinearRegressor' | 'Output'
+export type LinearOptimizer = 'sgd' | 'bgd' | 'adagrad' | 'adam' | 'newton'
 
 interface BuilderNode {
   id: string
@@ -35,6 +36,7 @@ interface TrainedModel {
   datasetId: string
   featureNames: string[]
   targetName: string
+  optimizer: LinearOptimizer
   weights: number[]
   bias: number
   includeNormalization: boolean
@@ -76,6 +78,7 @@ export interface LinearRegressionInitialConfig {
   includeNormalization: boolean
   fitIntercept: boolean
   l2Penalty: number
+  optimizer: LinearOptimizer
   epochs: number
   learningRate: number
   testSplit: number
@@ -83,12 +86,13 @@ export interface LinearRegressionInitialConfig {
 }
 
 const DEFAULT_INITIAL_CONFIG: LinearRegressionInitialConfig = {
-  datasetId: 'study_hours',
+  datasetId: 'diabetes_bmi',
   includeNormalization: true,
   fitIntercept: true,
   l2Penalty: 0,
-  epochs: 420,
-  learningRate: 0.03,
+  optimizer: 'bgd',
+  epochs: 700,
+  learningRate: 0.045,
   testSplit: 0.2,
   randomSeed: 42,
 }
@@ -96,6 +100,7 @@ const DEFAULT_INITIAL_CONFIG: LinearRegressionInitialConfig = {
 const COPY_FEEDBACK_MS = 1800
 const MIN_TEST_SPLIT = 0.05
 const MAX_TEST_SPLIT = 0.45
+const LINREG_PLOT_FRAME_DELAY_MS = 12
 
 const NODE_IDS = {
   input: 'linreg_input',
@@ -150,6 +155,7 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
   const [includeNormalization, setIncludeNormalization] = useState(resolvedInitial.includeNormalization)
   const [fitIntercept, setFitIntercept] = useState(resolvedInitial.fitIntercept)
   const [l2Penalty, setL2Penalty] = useState(resolvedInitial.l2Penalty)
+  const [optimizer, setOptimizer] = useState<LinearOptimizer>(normalizeOptimizer(resolvedInitial.optimizer))
   const [epochs, setEpochs] = useState(resolvedInitial.epochs)
   const [learningRate, setLearningRate] = useState(resolvedInitial.learningRate)
   const [testSplit, setTestSplit] = useState(resolvedInitial.testSplit)
@@ -173,6 +179,7 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
   const [trainingMetrics, setTrainingMetrics] = useState<TrainingMetric[]>([])
   const [currentEpoch, setCurrentEpoch] = useState(0)
   const [trainedModel, setTrainedModel] = useState<TrainedModel | null>(null)
+  const [trainingPreviewModel, setTrainingPreviewModel] = useState<TrainedModel | null>(null)
 
   const [inferenceInputs, setInferenceInputs] = useState<number[]>(() => {
     const initialDataset = getLinearRegressionDataset(resolvedInitial.datasetId)
@@ -226,7 +233,7 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
       role: 'hidden',
       name: nodeNameOverrides[NODE_IDS.linear] ?? 'Linear Regressor',
       sizeLabel: `${dataset.featureNames.length} weight${dataset.featureNames.length === 1 ? '' : 's'}${fitIntercept ? ' + bias' : ''}`,
-      subtitle: `MSE + L2(${trimNumber(l2Penalty, 4)})`,
+      subtitle: `MSE + L2(${trimNumber(l2Penalty, 4)}) · ${optimizerLabel(optimizer)}`,
     })
 
     next.push({
@@ -239,7 +246,7 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
     })
 
     return next
-  }, [dataset.featureNames, dataset.targetName, fitIntercept, includeNormalization, l2Penalty, nodeNameOverrides])
+  }, [dataset.featureNames, dataset.targetName, fitIntercept, includeNormalization, l2Penalty, nodeNameOverrides, optimizer])
 
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedNodeId) ?? null,
@@ -264,6 +271,8 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
   const featureCount = dataset.featureNames.length
   const parameterCount = featureCount + (fitIntercept ? 1 : 0)
   const sampleCount = dataset.samples.length
+  const regressionViewModel =
+    trainingStatus === 'training' ? trainingPreviewModel ?? trainedModel : trainedModel
 
   const latestMetric = trainingMetrics[trainingMetrics.length - 1]
   const trainLossSeries = trainingMetrics.map((metric) => metric.trainLoss)
@@ -278,6 +287,9 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
   const canOpenTestTab = trainedModel !== null
   const canOpenDeployTab = trainedModel !== null || deployment !== null
   const isTraining = trainingStatus === 'training'
+  const regressionDisplayParameters = regressionViewModel
+    ? getDisplayLinearParameters(regressionViewModel)
+    : null
 
   const activeTabIndex =
     activeTab === 'build' ? 0 : activeTab === 'train' ? 1 : activeTab === 'test' ? 2 : 3
@@ -319,6 +331,7 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
     setCurrentEpoch(0)
     setTrainingMetrics([])
     setTrainedModel(null)
+    setTrainingPreviewModel(null)
     setDeployment(null)
     setTrainingMessage(message)
   }
@@ -353,6 +366,11 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
   const updateL2Penalty = (value: number) => {
     setL2Penalty(value)
     invalidatePipelineState('Pipeline changed. Build again before training.')
+  }
+
+  const updateOptimizer = (value: string) => {
+    setOptimizer(normalizeOptimizer(value))
+    invalidatePipelineState('Optimizer changed. Build again before training.')
   }
 
   const handleAddLayer = () => {
@@ -463,11 +481,13 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
     const boundedLearningRate = clamp(learningRate, 0.000001, 5)
     const boundedSplit = clamp(testSplit, MIN_TEST_SPLIT, MAX_TEST_SPLIT)
     const boundedSeed = clampInt(randomSeed, -999999, 999999)
+    const resolvedOptimizer = normalizeOptimizer(optimizer)
 
     setEpochs(boundedEpochs)
     setLearningRate(boundedLearningRate)
     setTestSplit(boundedSplit)
     setRandomSeed(boundedSeed)
+    setOptimizer(resolvedOptimizer)
 
     const split = splitDataset(dataset.samples, dataset.targets, boundedSplit, boundedSeed)
     const normalization = includeNormalization
@@ -476,42 +496,93 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
 
     const trainX = applyNormalization(split.trainX, normalization)
     const testX = applyNormalization(split.testX, normalization)
+    const targetNormalization = computeTargetNormalization(split.trainY)
+    const trainY = applyTargetNormalization(split.trainY, targetNormalization)
 
     let weights = new Array(featureCount).fill(0)
     let bias = 0
+    let optimizerState = createOptimizerState(resolvedOptimizer, featureCount)
+    const sgdRandom = createSeededRandom(boundedSeed ^ 0x85ebca6b)
 
     stopTrainingRef.current = false
     setTrainingStatus('training')
-    setTrainingMessage(`Training for ${boundedEpochs} epochs...`)
+    setTrainingMessage(
+      `Training with ${optimizerLabel(resolvedOptimizer)} for ${boundedEpochs} epochs...`
+    )
     setCurrentEpoch(0)
     setTrainingMetrics([])
     setTrainedModel(null)
+    setTrainingPreviewModel(null)
     setDeployment(null)
     setDeployTopPrediction(null)
     setDeployOutput('No deployed inference output yet.')
 
     try {
+      const metricsHistory: TrainingMetric[] = []
+      const modelSkeleton = {
+        datasetId: dataset.id,
+        featureNames: dataset.featureNames,
+        targetName: dataset.targetName,
+        optimizer: resolvedOptimizer,
+        includeNormalization,
+        means: normalization.means,
+        stds: normalization.stds,
+        fitIntercept,
+        l2Penalty,
+        trainSplitCount: split.trainX.length,
+        testSplitCount: split.testX.length,
+      }
+      const buildTrainingSnapshot = (snapshotWeights: number[], snapshotBias: number): TrainedModel => {
+        const denormalized = denormalizeTargetLinearParameters(
+          snapshotWeights,
+          snapshotBias,
+          targetNormalization
+        )
+        return {
+          ...modelSkeleton,
+          weights: denormalized.weights,
+          bias: denormalized.bias,
+        }
+      }
+
+      const uiUpdateStride =
+        boundedEpochs > 5000 ? 12 : boundedEpochs > 2500 ? 6 : boundedEpochs > 1200 ? 3 : 1
+
       for (let epoch = 1; epoch <= boundedEpochs; epoch += 1) {
         if (stopTrainingRef.current) {
+          const latestSnapshot = buildTrainingSnapshot(weights, bias)
+          setTrainingPreviewModel(latestSnapshot)
+          setTrainingMetrics(metricsHistory.slice())
+          setCurrentEpoch(Math.max(0, epoch - 1))
           setTrainingStatus('stopped')
           setTrainingMessage(`Training stopped at epoch ${epoch - 1}.`)
           return
         }
 
-        const step = gradientStep({
+        const step = optimizerStep({
+          optimizer: resolvedOptimizer,
           x: trainX,
-          y: split.trainY,
+          y: trainY,
           weights,
           bias,
           learningRate: boundedLearningRate,
           fitIntercept,
           l2Penalty,
+          optimizerState,
+          random: sgdRandom,
         })
         weights = step.weights
         bias = step.bias
+        optimizerState = step.optimizerState
 
-        const trainPredictions = predictBatch(trainX, weights, bias)
-        const testPredictions = predictBatch(testX, weights, bias)
+        const trainPredictions = denormalizePredictions(
+          predictBatch(trainX, weights, bias),
+          targetNormalization
+        )
+        const testPredictions = denormalizePredictions(
+          predictBatch(testX, weights, bias),
+          targetNormalization
+        )
 
         const metric: TrainingMetric = {
           epoch,
@@ -523,23 +594,28 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
           testR2: r2Score(split.testY, testPredictions),
         }
 
-        setTrainingMetrics((current) => [...current, metric])
-        setCurrentEpoch(epoch)
-
-        if (epoch % 3 === 0 || epoch === boundedEpochs) {
+        metricsHistory.push(metric)
+        const shouldRefreshUi =
+          epoch === 1 || epoch === boundedEpochs || epoch % uiUpdateStride === 0
+        if (shouldRefreshUi) {
+          setTrainingMetrics(metricsHistory.slice())
+          setCurrentEpoch(epoch)
+          setTrainingPreviewModel(buildTrainingSnapshot(weights, bias))
           setTrainingMessage(
             `Epoch ${epoch}/${boundedEpochs} · train_mse=${trimNumber(metric.trainLoss, 4)} · test_mse=${trimNumber(metric.testLoss, 4)}`
           )
-          await nextFrame()
+          await nextFrame(LINREG_PLOT_FRAME_DELAY_MS)
         }
       }
 
+      const finalParameters = denormalizeTargetLinearParameters(weights, bias, targetNormalization)
       const finalModel: TrainedModel = {
         datasetId: dataset.id,
         featureNames: dataset.featureNames,
         targetName: dataset.targetName,
-        weights,
-        bias,
+        optimizer: resolvedOptimizer,
+        weights: finalParameters.weights,
+        bias: finalParameters.bias,
         includeNormalization,
         means: normalization.means,
         stds: normalization.stds,
@@ -549,17 +625,24 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
         testSplitCount: split.testX.length,
       }
 
+      setTrainingPreviewModel(null)
+      setTrainingMetrics(metricsHistory)
+      setCurrentEpoch(boundedEpochs)
       setTrainedModel(finalModel)
       setTrainingStatus('complete')
       setTrainingMessage(
         `Training complete. Final test MSE ${trimNumber(
-          meanSquaredError(split.testY, predictBatch(testX, weights, bias)),
+          meanSquaredError(
+            split.testY,
+            denormalizePredictions(predictBatch(testX, weights, bias), targetNormalization)
+          ),
           5
-        )}.`
+        )} using ${optimizerLabel(resolvedOptimizer)}.`
       )
       setActiveTab('test')
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error)
+      setTrainingPreviewModel(null)
       setTrainingStatus('error')
       setTrainingMessage(`Training failed: ${text}`)
     }
@@ -606,6 +689,7 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
       residual,
       output_name: trainedModel.targetName,
       model: {
+        optimizer: trainedModel.optimizer,
         weights: trainedModel.weights,
         bias: trainedModel.bias,
         normalization: trainedModel.includeNormalization,
@@ -903,8 +987,8 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
                           className="activation-select"
                           disabled={isTraining}
                         >
+                          <option value="diabetes_bmi">Diabetes BMI (Real)</option>
                           <option value="study_hours">Study Hours</option>
-                          <option value="home_value_tiny">Home Value Tiny</option>
                         </select>
                       </label>
 
@@ -943,6 +1027,22 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
                           onChange={(event) => updateFitIntercept(event.target.checked)}
                           disabled={isTraining}
                         />
+                      </label>
+
+                      <label className="field-group field-group-inline">
+                        <span className="field-label">Optimizer</span>
+                        <select
+                          value={optimizer}
+                          onChange={(event) => updateOptimizer(event.target.value)}
+                          className="activation-select"
+                          disabled={isTraining}
+                        >
+                          <option value="bgd">Batch Gradient Descent (BGD)</option>
+                          <option value="sgd">Stochastic Gradient Descent (SGD)</option>
+                          <option value="adagrad">Adagrad</option>
+                          <option value="adam">Adam</option>
+                          <option value="newton">Newton&apos;s Method</option>
+                        </select>
                       </label>
 
                       <label className="field-group field-group-inline">
@@ -987,6 +1087,7 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
                     label="Preprocessing"
                     value={includeNormalization ? 'Normalize' : 'None'}
                   />
+                  <MetricTile label="Optimizer" value={optimizerLabel(optimizer)} />
                 </div>
               </section>
 
@@ -1107,8 +1208,8 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
                       className="config-control"
                       disabled={isTraining}
                     >
+                      <option value="diabetes_bmi">Diabetes BMI (Real)</option>
                       <option value="study_hours">Study Hours</option>
-                      <option value="home_value_tiny">Home Value Tiny</option>
                     </select>
                   </label>
 
@@ -1137,6 +1238,22 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
                       className="config-control config-control-numeric"
                       disabled={isTraining}
                     />
+                  </label>
+
+                  <label className="config-row">
+                    <span className="config-label">Optimizer</span>
+                    <select
+                      value={optimizer}
+                      onChange={(event) => updateOptimizer(event.target.value)}
+                      className="config-control"
+                      disabled={isTraining}
+                    >
+                      <option value="bgd">Batch Gradient Descent (BGD)</option>
+                      <option value="sgd">Stochastic Gradient Descent (SGD)</option>
+                      <option value="adagrad">Adagrad</option>
+                      <option value="adam">Adam</option>
+                      <option value="newton">Newton&apos;s Method</option>
+                    </select>
                   </label>
 
                   <label className="config-row">
@@ -1488,29 +1605,31 @@ export default function LinearRegressionPage({ initialConfig }: LinearRegression
               <h3>Dataset + Regression Fit</h3>
               <RegressionScatterPlot
                 dataset={dataset}
-                trainedModel={trainedModel}
+                trainedModel={regressionViewModel}
                 inferenceInputs={inferenceInputs}
                 inferencePrediction={inferenceTopPrediction}
               />
             </article>
 
             <article className="linreg-viewport-card">
-              <h3>Model Equation</h3>
+              <h3>{trainingStatus === 'training' ? 'Model Equation (Live)' : 'Model Equation'}</h3>
               <p className="linreg-equation-line">
-                {trainedModel ? formatEquation(trainedModel) : 'Train model to populate equation.'}
+                {regressionViewModel && regressionDisplayParameters
+                  ? formatEquation(regressionViewModel, regressionDisplayParameters)
+                  : 'Train model to populate equation.'}
               </p>
 
-              {trainedModel ? (
+              {regressionViewModel && regressionDisplayParameters ? (
                 <ul className="linreg-coeff-list">
-                  {trainedModel.weights.map((weight, index) => (
-                    <li key={`${trainedModel.featureNames[index]}-${index}`}>
-                      <span>{trainedModel.featureNames[index]}</span>
+                  {regressionDisplayParameters.weights.map((weight, index) => (
+                    <li key={`${regressionViewModel.featureNames[index]}-${index}`}>
+                      <span>{regressionViewModel.featureNames[index]}</span>
                       <span>{trimNumber(weight, 6)}</span>
                     </li>
                   ))}
                   <li>
                     <span>bias</span>
-                    <span>{trimNumber(trainedModel.bias, 6)}</span>
+                    <span>{trimNumber(regressionDisplayParameters.bias, 6)}</span>
                   </li>
                 </ul>
               ) : (
@@ -1539,6 +1658,8 @@ function RegressionScatterPlot({
   inferenceInputs,
   inferencePrediction,
 }: RegressionScatterPlotProps) {
+  const clipId = `linreg-clip-${useId().replaceAll(':', '')}`
+
   if (dataset.featureNames.length !== 1) {
     return (
       <div className="linreg-scatter-empty">
@@ -1547,19 +1668,46 @@ function RegressionScatterPlot({
     )
   }
 
-  const width = 720
-  const height = 280
-  const padding = { top: 14, right: 18, bottom: 34, left: 40 }
+  const width = 1400
+  const height = 640
+  const padding = { top: 20, right: 28, bottom: 74, left: 84 }
   const plotWidth = width - padding.left - padding.right
   const plotHeight = height - padding.top - padding.bottom
 
   const xValues = dataset.samples.map((row) => row[0])
   const yValues = dataset.targets
+  const inferenceX = inferenceInputs[0]
 
-  const xMin = Math.min(...xValues)
-  const xMax = Math.max(...xValues)
-  const yMin = Math.min(...yValues)
-  const yMax = Math.max(...yValues)
+  const xDomainCandidates = [...xValues]
+  if (Number.isFinite(inferenceX)) {
+    xDomainCandidates.push(inferenceX)
+  }
+  const lineCandidates: { x: number; y: number }[] = []
+  const xMinSeed = Math.min(...xDomainCandidates)
+  const xMaxSeed = Math.max(...xDomainCandidates)
+  if (trainedModel) {
+    lineCandidates.push(
+      { x: xMinSeed, y: predictWithModel([xMinSeed], trainedModel) },
+      { x: xMaxSeed, y: predictWithModel([xMaxSeed], trainedModel) }
+    )
+  }
+
+  const allYValues = yValues
+    .concat(lineCandidates.map((point) => point.y))
+    .concat(inferencePrediction !== null ? [inferencePrediction] : [])
+
+  const xMinRaw = Math.min(...xDomainCandidates)
+  const xMaxRaw = Math.max(...xDomainCandidates)
+  const yMinRaw = Math.min(...allYValues)
+  const yMaxRaw = Math.max(...allYValues)
+
+  const xPad = Math.max((xMaxRaw - xMinRaw) * 0.06, 1e-6)
+  const yPad = Math.max((yMaxRaw - yMinRaw) * 0.08, 1)
+
+  const xMin = xMinRaw - xPad
+  const xMax = xMaxRaw + xPad
+  const yMin = yMinRaw - yPad
+  const yMax = yMaxRaw + yPad
 
   const safeXSpan = Math.max(xMax - xMin, 1e-6)
   const safeYSpan = Math.max(yMax - yMin, 1e-6)
@@ -1567,18 +1715,25 @@ function RegressionScatterPlot({
   const toX = (value: number) => padding.left + ((value - xMin) / safeXSpan) * plotWidth
   const toY = (value: number) => padding.top + (1 - (value - yMin) / safeYSpan) * plotHeight
 
-  const linePoints = trainedModel
-    ? [
-        { x: xMin, y: predictWithModel([xMin], trainedModel) },
-        { x: xMax, y: predictWithModel([xMax], trainedModel) },
-      ]
-    : null
-
-  const inferenceX = inferenceInputs[0]
+  const xTicks = createAxisTicks(xMinRaw, xMaxRaw, 6)
+  const yTicks = createAxisTicks(yMinRaw, yMaxRaw, 6)
+  const linePoints = lineCandidates.length === 2 ? lineCandidates : null
 
   return (
     <div className="linreg-scatter-shell">
       <svg viewBox={`0 0 ${width} ${height}`} className="linreg-scatter-svg">
+        <defs>
+          <clipPath id={clipId}>
+            <rect
+              x={padding.left}
+              y={padding.top}
+              width={plotWidth}
+              height={plotHeight}
+              rx={10}
+            />
+          </clipPath>
+        </defs>
+
         <rect
           x={padding.left}
           y={padding.top}
@@ -1587,6 +1742,27 @@ function RegressionScatterPlot({
           rx={10}
           className="linreg-scatter-bg"
         />
+
+        {yTicks.map((tick) => (
+          <line
+            key={`y-grid-${tick}`}
+            x1={padding.left}
+            y1={toY(tick)}
+            x2={padding.left + plotWidth}
+            y2={toY(tick)}
+            className="linreg-scatter-grid"
+          />
+        ))}
+        {xTicks.map((tick) => (
+          <line
+            key={`x-grid-${tick}`}
+            x1={toX(tick)}
+            y1={padding.top}
+            x2={toX(tick)}
+            y2={padding.top + plotHeight}
+            className="linreg-scatter-grid"
+          />
+        ))}
 
         <line
           x1={padding.left}
@@ -1603,53 +1779,66 @@ function RegressionScatterPlot({
           className="linreg-scatter-axis"
         />
 
-        {xValues.map((xValue, index) => (
-          <circle
-            key={`point-${index}`}
-            cx={toX(xValue)}
-            cy={toY(yValues[index])}
-            r={3.2}
-            className="linreg-scatter-point"
-          />
+        <g clipPath={`url(#${clipId})`}>
+          {xValues.map((xValue, index) => (
+            <circle
+              key={`point-${index}`}
+              cx={toX(xValue)}
+              cy={toY(yValues[index])}
+              r={3.6}
+              className="linreg-scatter-point"
+            />
+          ))}
+
+          {linePoints ? (
+            <line
+              x1={toX(linePoints[0].x)}
+              y1={toY(linePoints[0].y)}
+              x2={toX(linePoints[1].x)}
+              y2={toY(linePoints[1].y)}
+              className="linreg-scatter-fit-line"
+            />
+          ) : null}
+
+          {Number.isFinite(inferenceX) ? (
+            <line
+              x1={toX(inferenceX)}
+              y1={padding.top}
+              x2={toX(inferenceX)}
+              y2={padding.top + plotHeight}
+              className="linreg-scatter-cursor"
+            />
+          ) : null}
+
+          {inferencePrediction !== null && Number.isFinite(inferenceX) ? (
+            <circle
+              cx={toX(inferenceX)}
+              cy={toY(inferencePrediction)}
+              r={5.4}
+              className="linreg-scatter-prediction"
+            />
+          ) : null}
+        </g>
+
+        {yTicks.map((tick) => (
+          <text key={`y-tick-${tick}`} x={padding.left - 10} y={toY(tick) + 4} className="linreg-scatter-tick">
+            {formatAxisTick(tick)}
+          </text>
+        ))}
+        {xTicks.map((tick) => (
+          <text key={`x-tick-${tick}`} x={toX(tick)} y={padding.top + plotHeight + 20} className="linreg-scatter-tick linreg-scatter-tick-x">
+            {formatAxisTick(tick)}
+          </text>
         ))}
 
-        {linePoints ? (
-          <line
-            x1={toX(linePoints[0].x)}
-            y1={toY(linePoints[0].y)}
-            x2={toX(linePoints[1].x)}
-            y2={toY(linePoints[1].y)}
-            className="linreg-scatter-fit-line"
-          />
-        ) : null}
-
-        {Number.isFinite(inferenceX) ? (
-          <line
-            x1={toX(inferenceX)}
-            y1={padding.top}
-            x2={toX(inferenceX)}
-            y2={padding.top + plotHeight}
-            className="linreg-scatter-cursor"
-          />
-        ) : null}
-
-        {inferencePrediction !== null && Number.isFinite(inferenceX) ? (
-          <circle
-            cx={toX(inferenceX)}
-            cy={toY(inferencePrediction)}
-            r={5}
-            className="linreg-scatter-prediction"
-          />
-        ) : null}
-
-        <text x={padding.left + plotWidth / 2} y={height - 8} className="linreg-scatter-label">
+        <text x={padding.left + plotWidth / 2} y={height - 20} className="linreg-scatter-label">
           {dataset.featureNames[0]}
         </text>
         <text
-          x={12}
+          x={22}
           y={padding.top + plotHeight / 2}
           className="linreg-scatter-label"
-          transform={`rotate(-90 12 ${padding.top + plotHeight / 2})`}
+          transform={`rotate(-90 22 ${padding.top + plotHeight / 2})`}
         >
           {dataset.targetName}
         </text>
@@ -1683,6 +1872,27 @@ function clampInt(value: number, min: number, max: number): number {
 function trimNumber(value: number, digits = 4): string {
   if (!Number.isFinite(value)) return '0'
   return Number(value.toFixed(digits)).toString()
+}
+
+function normalizeOptimizer(value: string | undefined | null): LinearOptimizer {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase()
+  if (normalized === 'sgd') return 'sgd'
+  if (normalized === 'adagrad') return 'adagrad'
+  if (normalized === 'adam') return 'adam'
+  if (normalized === 'newton' || normalized === 'newtons' || normalized === 'newton_method') {
+    return 'newton'
+  }
+  return 'bgd'
+}
+
+function optimizerLabel(optimizer: LinearOptimizer): string {
+  if (optimizer === 'sgd') return 'SGD'
+  if (optimizer === 'adagrad') return 'Adagrad'
+  if (optimizer === 'adam') return 'Adam'
+  if (optimizer === 'newton') return "Newton's Method"
+  return 'BGD'
 }
 
 function splitDataset(
@@ -1758,33 +1968,100 @@ function applyNormalization(x: number[][], stats: NormalizationStats): number[][
   )
 }
 
-interface GradientStepInput {
+interface TargetNormalizationStats {
+  mean: number
+  std: number
+}
+
+function computeTargetNormalization(y: number[]): TargetNormalizationStats {
+  if (y.length === 0) {
+    return { mean: 0, std: 1 }
+  }
+  const mean = y.reduce((sum, value) => sum + value, 0) / y.length
+  let variance = 0
+  for (let index = 0; index < y.length; index += 1) {
+    const centered = y[index] - mean
+    variance += centered * centered
+  }
+  const std = Math.sqrt(variance / y.length)
+  return {
+    mean,
+    std: std > 1e-9 ? std : 1,
+  }
+}
+
+function applyTargetNormalization(y: number[], stats: TargetNormalizationStats): number[] {
+  return y.map((value) => (value - stats.mean) / stats.std)
+}
+
+function denormalizePredictions(y: number[], stats: TargetNormalizationStats): number[] {
+  return y.map((value) => value * stats.std + stats.mean)
+}
+
+function denormalizeTargetLinearParameters(
+  weights: number[],
+  bias: number,
+  stats: TargetNormalizationStats
+): { weights: number[]; bias: number } {
+  return {
+    weights: weights.map((value) => value * stats.std),
+    bias: bias * stats.std + stats.mean,
+  }
+}
+
+interface GradientInput {
   x: number[][]
   y: number[]
   weights: number[]
   bias: number
-  learningRate: number
   fitIntercept: boolean
   l2Penalty: number
 }
 
-function gradientStep({
+interface GradientResult {
+  weightGradients: number[]
+  biasGradient: number
+}
+
+interface OptimizerState {
+  adagradWeightSquares?: number[]
+  adagradBiasSquare?: number
+  adamMWeights?: number[]
+  adamVWeights?: number[]
+  adamMBias?: number
+  adamVBias?: number
+  adamT?: number
+}
+
+interface OptimizerStepInput extends GradientInput {
+  optimizer: LinearOptimizer
+  learningRate: number
+  optimizerState: OptimizerState
+  random: () => number
+}
+
+interface OptimizerStepResult {
+  weights: number[]
+  bias: number
+  optimizerState: OptimizerState
+}
+
+function computeGradient({
   x,
   y,
   weights,
   bias,
-  learningRate,
   fitIntercept,
   l2Penalty,
-}: GradientStepInput): { weights: number[]; bias: number } {
+}: GradientInput): GradientResult {
   const sampleCount = x.length
-  if (sampleCount === 0) {
-    return { weights: weights.slice(), bias }
-  }
-
   const featureCount = weights.length
   const weightGradients = new Array(featureCount).fill(0)
   let biasGradient = 0
+
+  if (sampleCount === 0) {
+    return { weightGradients, biasGradient }
+  }
 
   for (let sample = 0; sample < sampleCount; sample += 1) {
     const prediction = dot(x[sample], weights) + (fitIntercept ? bias : 0)
@@ -1805,10 +2082,442 @@ function gradientStep({
     }
   }
 
-  const nextWeights = weights.map((weight, feature) => weight - learningRate * weightGradients[feature])
-  const nextBias = fitIntercept ? bias - learningRate * biasGradient : 0
+  return { weightGradients, biasGradient }
+}
 
-  return { weights: nextWeights, bias: nextBias }
+function createOptimizerState(optimizer: LinearOptimizer, featureCount: number): OptimizerState {
+  if (optimizer === 'adagrad') {
+    return {
+      adagradWeightSquares: new Array(featureCount).fill(0),
+      adagradBiasSquare: 0,
+    }
+  }
+  if (optimizer === 'adam') {
+    return {
+      adamMWeights: new Array(featureCount).fill(0),
+      adamVWeights: new Array(featureCount).fill(0),
+      adamMBias: 0,
+      adamVBias: 0,
+      adamT: 0,
+    }
+  }
+  return {}
+}
+
+function optimizerStep({
+  optimizer,
+  x,
+  y,
+  weights,
+  bias,
+  learningRate,
+  fitIntercept,
+  l2Penalty,
+  optimizerState,
+  random,
+}: OptimizerStepInput): OptimizerStepResult {
+  if (optimizer === 'sgd') {
+    return sgdStep({
+      x,
+      y,
+      weights,
+      bias,
+      learningRate,
+      fitIntercept,
+      l2Penalty,
+      optimizerState,
+      random,
+    })
+  }
+  if (optimizer === 'adagrad') {
+    return adagradStep({
+      x,
+      y,
+      weights,
+      bias,
+      learningRate,
+      fitIntercept,
+      l2Penalty,
+      optimizerState,
+    })
+  }
+  if (optimizer === 'adam') {
+    return adamStep({
+      x,
+      y,
+      weights,
+      bias,
+      learningRate,
+      fitIntercept,
+      l2Penalty,
+      optimizerState,
+    })
+  }
+  if (optimizer === 'newton') {
+    return newtonStep({
+      x,
+      y,
+      weights,
+      bias,
+      learningRate,
+      fitIntercept,
+      l2Penalty,
+      optimizerState,
+    })
+  }
+
+  const gradient = computeGradient({
+    x,
+    y,
+    weights,
+    bias,
+    fitIntercept,
+    l2Penalty,
+  })
+
+  const nextWeights = weights.map(
+    (weight, feature) => weight - learningRate * gradient.weightGradients[feature]
+  )
+  const nextBias = fitIntercept ? bias - learningRate * gradient.biasGradient : 0
+
+  return {
+    weights: nextWeights,
+    bias: nextBias,
+    optimizerState,
+  }
+}
+
+interface SgdStepInput extends GradientInput {
+  learningRate: number
+  optimizerState: OptimizerState
+  random: () => number
+}
+
+function sgdStep({
+  x,
+  y,
+  weights,
+  bias,
+  learningRate,
+  fitIntercept,
+  l2Penalty,
+  optimizerState,
+  random,
+}: SgdStepInput): OptimizerStepResult {
+  const sampleCount = x.length
+  if (sampleCount === 0) {
+    return { weights: weights.slice(), bias, optimizerState }
+  }
+
+  const indices = new Array(sampleCount).fill(0).map((_, index) => index)
+  for (let index = indices.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1))
+    const current = indices[index]
+    indices[index] = indices[swapIndex]
+    indices[swapIndex] = current
+  }
+
+  const nextWeights = weights.slice()
+  let nextBias = fitIntercept ? bias : 0
+
+  for (let position = 0; position < indices.length; position += 1) {
+    const sampleIndex = indices[position]
+    const row = x[sampleIndex]
+    const prediction = dot(row, nextWeights) + (fitIntercept ? nextBias : 0)
+    const error = prediction - y[sampleIndex]
+
+    for (let feature = 0; feature < nextWeights.length; feature += 1) {
+      const l2Term = l2Penalty > 0 ? 2 * l2Penalty * nextWeights[feature] : 0
+      const gradient = 2 * row[feature] * error + l2Term
+      nextWeights[feature] -= learningRate * gradient
+    }
+
+    if (fitIntercept) {
+      nextBias -= learningRate * (2 * error)
+    }
+  }
+
+  return {
+    weights: nextWeights,
+    bias: fitIntercept ? nextBias : 0,
+    optimizerState,
+  }
+}
+
+interface AdaptiveStepInput extends GradientInput {
+  learningRate: number
+  optimizerState: OptimizerState
+}
+
+function adagradStep({
+  x,
+  y,
+  weights,
+  bias,
+  learningRate,
+  fitIntercept,
+  l2Penalty,
+  optimizerState,
+}: AdaptiveStepInput): OptimizerStepResult {
+  const epsilon = 1e-8
+  const gradient = computeGradient({
+    x,
+    y,
+    weights,
+    bias,
+    fitIntercept,
+    l2Penalty,
+  })
+
+  const weightSquares =
+    optimizerState.adagradWeightSquares?.slice() ?? new Array(weights.length).fill(0)
+  let biasSquare = optimizerState.adagradBiasSquare ?? 0
+
+  const nextWeights = weights.map((weight, feature) => {
+    const grad = gradient.weightGradients[feature]
+    weightSquares[feature] += grad * grad
+    return weight - (learningRate * grad) / Math.sqrt(weightSquares[feature] + epsilon)
+  })
+
+  let nextBias = 0
+  if (fitIntercept) {
+    const gradB = gradient.biasGradient
+    biasSquare += gradB * gradB
+    nextBias = bias - (learningRate * gradB) / Math.sqrt(biasSquare + epsilon)
+  }
+
+  return {
+    weights: nextWeights,
+    bias: fitIntercept ? nextBias : 0,
+    optimizerState: {
+      ...optimizerState,
+      adagradWeightSquares: weightSquares,
+      adagradBiasSquare: biasSquare,
+    },
+  }
+}
+
+function adamStep({
+  x,
+  y,
+  weights,
+  bias,
+  learningRate,
+  fitIntercept,
+  l2Penalty,
+  optimizerState,
+}: AdaptiveStepInput): OptimizerStepResult {
+  const beta1 = 0.9
+  const beta2 = 0.999
+  const epsilon = 1e-8
+  const gradient = computeGradient({
+    x,
+    y,
+    weights,
+    bias,
+    fitIntercept,
+    l2Penalty,
+  })
+
+  const mWeights = optimizerState.adamMWeights?.slice() ?? new Array(weights.length).fill(0)
+  const vWeights = optimizerState.adamVWeights?.slice() ?? new Array(weights.length).fill(0)
+  let mBias = optimizerState.adamMBias ?? 0
+  let vBias = optimizerState.adamVBias ?? 0
+  const t = (optimizerState.adamT ?? 0) + 1
+
+  const nextWeights = weights.map((weight, feature) => {
+    const grad = gradient.weightGradients[feature]
+    mWeights[feature] = beta1 * mWeights[feature] + (1 - beta1) * grad
+    vWeights[feature] = beta2 * vWeights[feature] + (1 - beta2) * grad * grad
+    const mHat = mWeights[feature] / (1 - Math.pow(beta1, t))
+    const vHat = vWeights[feature] / (1 - Math.pow(beta2, t))
+    return weight - (learningRate * mHat) / (Math.sqrt(vHat) + epsilon)
+  })
+
+  let nextBias = 0
+  if (fitIntercept) {
+    const gradB = gradient.biasGradient
+    mBias = beta1 * mBias + (1 - beta1) * gradB
+    vBias = beta2 * vBias + (1 - beta2) * gradB * gradB
+    const mHatB = mBias / (1 - Math.pow(beta1, t))
+    const vHatB = vBias / (1 - Math.pow(beta2, t))
+    nextBias = bias - (learningRate * mHatB) / (Math.sqrt(vHatB) + epsilon)
+  }
+
+  return {
+    weights: nextWeights,
+    bias: fitIntercept ? nextBias : 0,
+    optimizerState: {
+      ...optimizerState,
+      adamMWeights: mWeights,
+      adamVWeights: vWeights,
+      adamMBias: mBias,
+      adamVBias: vBias,
+      adamT: t,
+    },
+  }
+}
+
+function newtonStep({
+  x,
+  y,
+  weights,
+  bias,
+  learningRate,
+  fitIntercept,
+  l2Penalty,
+  optimizerState,
+}: AdaptiveStepInput): OptimizerStepResult {
+  const direction = computeNewtonDirection({
+    x,
+    y,
+    weights,
+    bias,
+    fitIntercept,
+    l2Penalty,
+  })
+
+  if (!direction) {
+    return optimizerStep({
+      optimizer: 'bgd',
+      x,
+      y,
+      weights,
+      bias,
+      learningRate,
+      fitIntercept,
+      l2Penalty,
+      optimizerState,
+      random: Math.random,
+    })
+  }
+
+  const featureCount = weights.length
+  const nextWeights = new Array(featureCount).fill(0)
+  for (let feature = 0; feature < featureCount; feature += 1) {
+    nextWeights[feature] = weights[feature] - learningRate * direction[feature]
+  }
+  const nextBias = fitIntercept ? bias - learningRate * direction[featureCount] : 0
+
+  return {
+    weights: nextWeights,
+    bias: fitIntercept ? nextBias : 0,
+    optimizerState,
+  }
+}
+
+function computeNewtonDirection({
+  x,
+  y,
+  weights,
+  bias,
+  fitIntercept,
+  l2Penalty,
+}: GradientInput): number[] | null {
+  const sampleCount = x.length
+  const featureCount = weights.length
+  if (sampleCount === 0) return null
+
+  const parameterCount = featureCount + (fitIntercept ? 1 : 0)
+  const gradient = new Array(parameterCount).fill(0)
+  const hessian = new Array(parameterCount)
+    .fill(null)
+    .map(() => new Array(parameterCount).fill(0))
+  const invSampleScale = 2 / sampleCount
+
+  for (let sample = 0; sample < sampleCount; sample += 1) {
+    const row = x[sample]
+    const prediction = dot(row, weights) + (fitIntercept ? bias : 0)
+    const error = prediction - y[sample]
+
+    for (let feature = 0; feature < featureCount; feature += 1) {
+      gradient[feature] += invSampleScale * row[feature] * error
+    }
+    if (fitIntercept) {
+      gradient[featureCount] += invSampleScale * error
+    }
+
+    for (let left = 0; left < featureCount; left += 1) {
+      for (let right = left; right < featureCount; right += 1) {
+        const value = invSampleScale * row[left] * row[right]
+        hessian[left][right] += value
+        if (left !== right) {
+          hessian[right][left] += value
+        }
+      }
+    }
+
+    if (fitIntercept) {
+      for (let feature = 0; feature < featureCount; feature += 1) {
+        const cross = invSampleScale * row[feature]
+        hessian[feature][featureCount] += cross
+        hessian[featureCount][feature] += cross
+      }
+      hessian[featureCount][featureCount] += invSampleScale
+    }
+  }
+
+  for (let feature = 0; feature < featureCount; feature += 1) {
+    gradient[feature] += 2 * l2Penalty * weights[feature]
+    hessian[feature][feature] += 2 * l2Penalty
+  }
+
+  for (let diag = 0; diag < parameterCount; diag += 1) {
+    hessian[diag][diag] += 1e-9
+  }
+
+  return solveLinearSystem(hessian, gradient)
+}
+
+function solveLinearSystem(a: number[][], b: number[]): number[] | null {
+  const n = a.length
+  if (n === 0 || b.length !== n) return null
+
+  const matrix = a.map((row) => row.slice())
+  const rhs = b.slice()
+
+  for (let pivot = 0; pivot < n; pivot += 1) {
+    let bestRow = pivot
+    let bestAbs = Math.abs(matrix[pivot][pivot])
+    for (let row = pivot + 1; row < n; row += 1) {
+      const value = Math.abs(matrix[row][pivot])
+      if (value > bestAbs) {
+        bestAbs = value
+        bestRow = row
+      }
+    }
+
+    if (bestAbs < 1e-12) {
+      return null
+    }
+
+    if (bestRow !== pivot) {
+      const tempRow = matrix[pivot]
+      matrix[pivot] = matrix[bestRow]
+      matrix[bestRow] = tempRow
+      const tempRhs = rhs[pivot]
+      rhs[pivot] = rhs[bestRow]
+      rhs[bestRow] = tempRhs
+    }
+
+    const pivotValue = matrix[pivot][pivot]
+    for (let col = pivot; col < n; col += 1) {
+      matrix[pivot][col] /= pivotValue
+    }
+    rhs[pivot] /= pivotValue
+
+    for (let row = 0; row < n; row += 1) {
+      if (row === pivot) continue
+      const factor = matrix[row][pivot]
+      if (Math.abs(factor) < 1e-12) continue
+      for (let col = pivot; col < n; col += 1) {
+        matrix[row][col] -= factor * matrix[pivot][col]
+      }
+      rhs[row] -= factor * rhs[pivot]
+    }
+  }
+
+  return rhs
 }
 
 function dot(a: number[], b: number[]): number {
@@ -1880,6 +2589,27 @@ function getBoundsFromSeries(
   return { min, max }
 }
 
+function createAxisTicks(min: number, max: number, count: number): number[] {
+  const safeCount = Math.max(2, Math.floor(count))
+  const span = max - min
+  if (!Number.isFinite(span) || Math.abs(span) < 1e-12) {
+    return [min]
+  }
+  const ticks: number[] = []
+  for (let index = 0; index < safeCount; index += 1) {
+    ticks.push(min + (span * index) / (safeCount - 1))
+  }
+  return ticks
+}
+
+function formatAxisTick(value: number): string {
+  const abs = Math.abs(value)
+  if (abs >= 1000) return trimNumber(value, 0)
+  if (abs >= 100) return trimNumber(value, 1)
+  if (abs >= 10) return trimNumber(value, 2)
+  return trimNumber(value, 3)
+}
+
 function predictWithModel(input: number[], model: TrainedModel): number {
   const normalized = input.map(
     (value, feature) => (value - model.means[feature]) / model.stds[feature]
@@ -1887,13 +2617,43 @@ function predictWithModel(input: number[], model: TrainedModel): number {
   return dot(normalized, model.weights) + model.bias
 }
 
-function formatEquation(model: TrainedModel): string {
+function getDisplayLinearParameters(model: TrainedModel): { weights: number[]; bias: number } {
+  if (!model.includeNormalization) {
+    return {
+      weights: model.weights.slice(),
+      bias: model.bias,
+    }
+  }
+
+  const effectiveWeights = model.weights.map((weight, feature) => {
+    const std = model.stds[feature]
+    return std > 1e-9 ? weight / std : 0
+  })
+
+  let effectiveBias = model.bias
+  for (let feature = 0; feature < effectiveWeights.length; feature += 1) {
+    effectiveBias -= effectiveWeights[feature] * model.means[feature]
+  }
+
+  return {
+    weights: effectiveWeights,
+    bias: effectiveBias,
+  }
+}
+
+function formatEquation(model: TrainedModel, display: { weights: number[]; bias: number }): string {
   const terms = model.featureNames.map((feature, index) => {
-    const coeff = trimNumber(model.weights[index], 4)
+    const coeff = trimNumber(display.weights[index], 4)
     return `${coeff}*${feature}`
   })
 
-  const biasTerm = model.fitIntercept ? ` + ${trimNumber(model.bias, 4)}` : ''
+  const showBias = model.fitIntercept || Math.abs(display.bias) > 1e-9
+  const biasText = trimNumber(Math.abs(display.bias), 4)
+  const biasTerm = showBias
+    ? display.bias >= 0
+      ? ` + ${biasText}`
+      : ` - ${biasText}`
+    : ''
   return `${model.targetName} = ${terms.join(' + ')}${biasTerm}`
 }
 
@@ -1909,9 +2669,9 @@ function createSeededRandom(seed: number): () => number {
   }
 }
 
-async function nextFrame(): Promise<void> {
+async function nextFrame(delayMs = 0): Promise<void> {
   await new Promise<void>((resolve) => {
-    window.setTimeout(resolve, 0)
+    window.setTimeout(resolve, Math.max(0, delayMs))
   })
 }
 

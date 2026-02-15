@@ -25,6 +25,14 @@ export interface RFTrainingConfig {
   randomState: number
   stratify: boolean
   logEveryTrees: number
+  ensembleStrategy: 'bagging' | 'boosting' | 'stacking' | 'averaging'
+}
+
+export interface RFVisualizationConfig {
+  visibleTrees: number
+  treeDepth: number
+  treeSpread: number
+  nodeScale: number
 }
 
 export interface RFGraphPayload {
@@ -36,6 +44,7 @@ export interface RFGraphPayload {
     random_state: number
     stratify: boolean
     log_every_trees: number
+    ensemble_strategy: 'bagging' | 'boosting' | 'stacking' | 'averaging'
   }
 }
 

@@ -58,7 +58,7 @@ export function RfInferencePanel({
           </div>
         ))}
       </div>
-      <div className="rf-button-row">
+      <div className="rf-button-row rf-button-row-single">
         <button className="rf-btn rf-btn-indigo" onClick={onInfer}>
           Infer
         </button>

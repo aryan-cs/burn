@@ -13,6 +13,7 @@ class RFTrainingConfig(BaseModel):
     random_state: int = 42
     stratify: bool = True
     log_every_trees: int = 10
+    ensemble_strategy: str = "bagging"
 
     @field_validator("dataset")
     @classmethod
@@ -32,6 +33,15 @@ class RFTrainingConfig(BaseModel):
         if value <= 0:
             raise ValueError("log_every_trees must be > 0")
         return value
+
+    @field_validator("ensemble_strategy")
+    @classmethod
+    def validate_ensemble_strategy(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        allowed = {"bagging", "boosting", "stacking", "averaging"}
+        if normalized not in allowed:
+            raise ValueError(f"ensemble_strategy must be one of {sorted(allowed)}")
+        return normalized
 
 
 class RFHyperParams(BaseModel):

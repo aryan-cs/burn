@@ -360,14 +360,100 @@
 .deployments-infer {
   margin-top: 6px;
   min-height: 100px;
-  max-height: 180px;
+  max-height: 260px;
   overflow: auto;
   padding: 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   background: rgba(5, 8, 15, 0.9);
+}
+
+.deployments-infer-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.deployments-infer-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.deployments-infer-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.deployments-infer-summary span {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.deployments-infer-summary strong {
+  font-size: 13px;
+  color: #fff2d3;
+  font-weight: 600;
+}
+
+.deployments-infer-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.deployments-infer-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 184, 69, 0.45);
+  border-radius: 999px;
+  background: rgba(255, 184, 69, 0.13);
+  color: #ffe7b4;
   font-size: 11px;
-  color: #d7f7ff;
+}
+
+.deployments-probability-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.deployments-probability-row {
+  display: grid;
+  grid-template-columns: 70px 1fr 56px;
+  align-items: center;
+  gap: 8px;
+}
+
+.deployments-probability-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.deployments-probability-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.deployments-probability-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ffb429, #ffd27a);
+}
+
+.deployments-probability-value {
+  font-size: 11px;
+  text-align: right;
+  color: #ffeecf;
 }
 
 .deployments-empty {
@@ -388,5 +474,9 @@
   .deployments-log-line {
     grid-template-columns: 1fr;
     gap: 3px;
+  }
+
+  .deployments-infer-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

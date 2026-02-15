@@ -18,7 +18,6 @@ interface BuildTabProps {
   selectedDisplayName: string
   selectedRows: number
   selectedCols: number
-  selectedChannels: number
   selectedUnits: number
   selectedDropoutRate: number
   selectedOutputClasses: number
@@ -27,7 +26,6 @@ interface BuildTabProps {
   canEditSize: boolean
   sizeFieldLabel: string
   canEditActivation: boolean
-  canEditChannels: boolean
   canEditUnits: boolean
   canEditDropoutRate: boolean
   canEditOutputClasses: boolean
@@ -46,7 +44,6 @@ interface BuildTabProps {
   onNameCancel: () => void
   onRowsChange: (value: string) => void
   onColsChange: (value: string) => void
-  onChannelsChange: (value: string) => void
   onUnitsChange: (value: string) => void
   onDropoutRateChange: (value: string) => void
   onOutputClassesChange: (value: string) => void
@@ -70,7 +67,6 @@ export function BuildTab({
   selectedDisplayName,
   selectedRows,
   selectedCols,
-  selectedChannels,
   selectedUnits,
   selectedDropoutRate,
   selectedOutputClasses,
@@ -79,7 +75,6 @@ export function BuildTab({
   canEditSize,
   sizeFieldLabel,
   canEditActivation,
-  canEditChannels,
   canEditUnits,
   canEditDropoutRate,
   canEditOutputClasses,
@@ -98,7 +93,6 @@ export function BuildTab({
   onNameCancel,
   onRowsChange,
   onColsChange,
-  onChannelsChange,
   onUnitsChange,
   onDropoutRateChange,
   onOutputClassesChange,
@@ -253,21 +247,8 @@ export function BuildTab({
               )}
             </div>
           </div>
-          {(canEditChannels || canEditUnits || canEditDropoutRate || canEditOutputClasses) ? (
+          {(canEditUnits || canEditDropoutRate || canEditOutputClasses) ? (
             <div className="layer-editor-extra-grid">
-              {canEditChannels ? (
-                <label className="field-group field-group-inline">
-                  <span className="field-label">Channels</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={selectedChannels}
-                    onChange={(event) => onChannelsChange(event.target.value)}
-                    className="size-input"
-                  />
-                </label>
-              ) : null}
-
               {canEditUnits ? (
                 <label className="field-group field-group-inline">
                   <span className="field-label">Units</span>

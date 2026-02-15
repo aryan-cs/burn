@@ -5,7 +5,7 @@ import { RfDatasetPanel } from './components/RfDatasetPanel'
 import { RfGraphView } from './components/RfGraphView'
 import { RfInferencePanel } from './components/RfInferencePanel'
 import { RfLogsPanel } from './components/RfLogsPanel'
-import { RfTrainingPanel } from './components/RfTrainingPanel'
+import { RfForestConfigPanel, RfTrainingPanel } from './components/RfTrainingPanel'
 import { useRfWebSocket } from './hooks/useRfWebSocket'
 import { datasetDefaults, useRFGraphStore } from './store/rfGraphStore'
 import { useRFRunStore } from './store/rfRunStore'
@@ -72,13 +72,24 @@ function triggerDownload(filename: string, blob: Blob): void {
   URL.revokeObjectURL(url)
 }
 
+function toPositiveInt(value: unknown, fallback: number): number {
+  const asNumber = Number(value)
+  if (!Number.isFinite(asNumber)) return fallback
+  const rounded = Math.round(asNumber)
+  return rounded > 0 ? rounded : fallback
+}
+
 export default function RandomForestPage() {
   useRfWebSocket()
 
   const nodesMap = useRFGraphStore((state) => state.nodes)
   const training = useRFGraphStore((state) => state.training)
+  const visualization = useRFGraphStore((state) => state.visualization)
   const setDataset = useRFGraphStore((state) => state.setDataset)
   const setTraining = useRFGraphStore((state) => state.setTraining)
+  const setVisualization = useRFGraphStore((state) => state.setVisualization)
+  const setNodeConfig = useRFGraphStore((state) => state.setNodeConfig)
+  const resetPreset = useRFGraphStore((state) => state.resetPreset)
 
   const status = useRFRunStore((state) => state.status)
   const jobId = useRFRunStore((state) => state.jobId)
@@ -103,8 +114,8 @@ export default function RandomForestPage() {
   const [inferenceValues, setInferenceValues] = useState<number[]>(
     () => new Array(datasetDefaults(training.dataset).shape[0]).fill(0)
   )
-  const [leftCollapsed, setLeftCollapsed] = useState(false)
-  const [rightCollapsed, setRightCollapsed] = useState(false)
+  const [activeTab, setActiveTab] = useState<'build' | 'train' | 'test'>('build')
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
 
   const nodes = useMemo(() => Object.values(nodesMap), [nodesMap])
   const inputNode = useMemo(() => nodes.find((node) => node.type === 'RFInput') ?? null, [nodes])
@@ -116,6 +127,30 @@ export default function RandomForestPage() {
     return datasetDefaults(training.dataset).shape[0]
   }, [compileData?.summary?.expected_feature_count, inputNode, training.dataset])
   const featureNames = useMemo(() => finalResult?.feature_names ?? [], [finalResult?.feature_names])
+  const modelNode = useMemo(
+    () => nodes.find((node) => node.type === 'RandomForestClassifier') ?? null,
+    [nodes]
+  )
+  const totalTrees = useMemo(() => toPositiveInt(modelNode?.config.n_estimators, 100), [modelNode])
+  const latestProgress = progress[progress.length - 1]
+  const builtTrees = useMemo(
+    () =>
+      status === 'complete'
+        ? totalTrees
+        : Math.max(
+            0,
+            Math.min(
+              totalTrees,
+              Number.isFinite(latestProgress?.trees_built) ? latestProgress.trees_built : 0
+            )
+          ),
+    [latestProgress?.trees_built, status, totalTrees]
+  )
+  const completionPercent = useMemo(
+    () => (totalTrees > 0 ? Math.round((builtTrees / totalTrees) * 100) : 0),
+    [builtTrees, totalTrees]
+  )
+  const activeTabIndex = activeTab === 'build' ? 0 : activeTab === 'train' ? 1 : 2
 
   useEffect(() => {
     setInferenceValues((current) => {
@@ -340,83 +375,157 @@ export default function RandomForestPage() {
   )
 
   return (
-    <div className="rf-page">
-      <div className="rf-builder-layer">
-        <RfGraphView />
-      </div>
+    <div className={`app-shell rf-page ${isSidebarCollapsed ? 'app-shell-collapsed' : ''}`}>
+      <section className="app-sidebar rf-sidebar">
+        <div className="app-sidebar-inner">
+          <div className="app-tab-strip rf-tab-strip">
+            <div
+              aria-hidden
+              className="app-tab-indicator"
+              style={{ transform: `translateX(${activeTabIndex * 100}%)` }}
+            >
+              <div className="app-tab-indicator-inner">
+                <div className="app-tab-indicator-glow" />
+                <div className="app-tab-indicator-line" />
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab('build')}
+              className={`app-tab-button ${
+                activeTab === 'build' ? 'app-tab-button-active' : 'app-tab-button-inactive'
+              }`}
+            >
+              Build
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('train')}
+              className={`app-tab-button ${
+                activeTab === 'train' ? 'app-tab-button-active' : 'app-tab-button-inactive'
+              }`}
+            >
+              Train
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('test')}
+              className={`app-tab-button ${
+                activeTab === 'test' ? 'app-tab-button-active' : 'app-tab-button-inactive'
+              }`}
+            >
+              Test
+            </button>
+          </div>
 
-      <div className="rf-overlay-root">
-        {!leftCollapsed ? (
-          <aside className="rf-side-panel rf-side-left">
-            <section className="rf-card">
-              <div className="rf-card-title-row">
-                <span className="rf-card-title">RF Builder</span>
-                <button className="rf-btn rf-btn-sm" onClick={() => setLeftCollapsed(true)}>
-                  Collapse
-                </button>
-              </div>
-              <div className="rf-hint">
-                Scratch-like ML workflow: place nodes in 3D, connect them, then validate/compile/train.
-              </div>
-            </section>
-            <RfDatasetPanel datasets={datasets} datasetId={training.dataset} onChangeDataset={handleDatasetChange} />
-            <RfTrainingPanel
-              training={training}
-              status={status}
-              activeJobId={jobId}
-              onPatchTraining={setTraining}
-              onValidate={runValidate}
-              onCompile={runCompile}
-              onTrain={runTrain}
-              onStop={runStop}
-              onStatus={runStatus}
-              onExportPy={runExportPy}
-              onExportPkl={runExportPkl}
-            />
-            <RfInferencePanel
-              featureCount={featureCount}
-              featureNames={featureNames}
-              values={inferenceValues}
-              onChangeValues={setInferenceValues}
-              onLoadImage={handleInferenceImage}
-              onInfer={runInfer}
-              inferenceData={inferenceData}
-            />
-          </aside>
-        ) : (
-          <button className="rf-dock-toggle rf-dock-toggle-left" onClick={() => setLeftCollapsed(false)}>
-            Open Left
-          </button>
-        )}
+          {activeTab === 'build' ? (
+            <div className="tab-panel rf-tab-panel">
+              <section className="rf-card">
+                <div className="rf-card-title">Random Forest Builder</div>
+                <div className="rf-hint">
+                  Place nodes in 3D, connect the flow, and configure dataset + model settings.
+                </div>
+              </section>
+              <RfDatasetPanel
+                datasets={datasets}
+                datasetId={training.dataset}
+                onChangeDataset={handleDatasetChange}
+              />
+              <RfLogsPanel logs={logs} onClear={clearLogs} />
+            </div>
+          ) : null}
 
-        {!rightCollapsed ? (
-          <aside className="rf-side-panel rf-side-right">
-            <section className="rf-card">
-              <div className="rf-card-title-row">
-                <span className="rf-card-title">Outputs</span>
-                <button className="rf-btn rf-btn-sm" onClick={() => setRightCollapsed(true)}>
-                  Collapse
-                </button>
-              </div>
-              <div className="rf-hint">Live metrics, artifacts, schema payloads, and debug views.</div>
-            </section>
-            <RfChartsPanel progress={progress} finalResult={finalResult} />
-            <section className="rf-card">
-              <div className="rf-card-title">Compile Source Preview</div>
-              <pre className="rf-json">
-                {compileData?.python_source
-                  ? compileData.python_source.slice(0, 4000)
-                  : 'Compile output will appear here.'}
-              </pre>
-            </section>
-            <RfLogsPanel logs={logs} onClear={clearLogs} />
-          </aside>
-        ) : (
-          <button className="rf-dock-toggle rf-dock-toggle-right" onClick={() => setRightCollapsed(false)}>
-            Open Right
-          </button>
-        )}
-      </div>
+          {activeTab === 'train' ? (
+            <div className="tab-panel rf-tab-panel">
+              <RfTrainingPanel
+                training={training}
+                visualization={visualization}
+                status={status}
+                activeJobId={jobId}
+                builtTrees={builtTrees}
+                totalTrees={totalTrees}
+                completionPercent={completionPercent}
+                onPatchTraining={setTraining}
+                onPatchVisualization={setVisualization}
+                onValidate={runValidate}
+                onCompile={runCompile}
+                onTrain={runTrain}
+                onStop={runStop}
+                onStatus={runStatus}
+                onExportPy={runExportPy}
+                onExportPkl={runExportPkl}
+              />
+              <RfForestConfigPanel
+                modelNode={modelNode}
+                onPatchNodeConfig={setNodeConfig}
+                onResetPreset={resetPreset}
+              />
+              <RfChartsPanel progress={progress} finalResult={finalResult} />
+              <section className="rf-card">
+                <div className="rf-card-title">Compile Source Preview</div>
+                <pre className="rf-json">
+                  {compileData?.python_source
+                    ? compileData.python_source.slice(0, 4000)
+                    : 'Compile output will appear here.'}
+                </pre>
+              </section>
+              <RfLogsPanel logs={logs} onClear={clearLogs} />
+            </div>
+          ) : null}
+
+          {activeTab === 'test' ? (
+            <div className="tab-panel rf-tab-panel">
+              <RfInferencePanel
+                featureCount={featureCount}
+                featureNames={featureNames}
+                values={inferenceValues}
+                onChangeValues={setInferenceValues}
+                onLoadImage={handleInferenceImage}
+                onInfer={runInfer}
+                inferenceData={inferenceData}
+              />
+              <RfLogsPanel logs={logs} onClear={clearLogs} />
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="app-viewport-panel rf-viewport-panel">
+        <button
+          type="button"
+          className="sidebar-toggle-button rf-sidebar-toggle"
+          onClick={() => setIsSidebarCollapsed((current) => !current)}
+          aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {isSidebarCollapsed ? (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              height="16px"
+              viewBox="0 -960 960 960"
+              width="16px"
+              fill="#e3e3e3"
+              aria-hidden="true"
+            >
+              <path d="m321-80-71-71 329-329-329-329 71-71 400 400L321-80Z" />
+            </svg>
+          ) : (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              height="16px"
+              viewBox="0 -960 960 960"
+              width="16px"
+              fill="#e3e3e3"
+              aria-hidden="true"
+            >
+              <path d="M400-80 0-480l400-400 71 71-329 329 329 329-71 71Z" />
+            </svg>
+          )}
+        </button>
+        <div className="rf-builder-layer">
+          <RfGraphView />
+        </div>
+      </section>
     </div>
   )
 }

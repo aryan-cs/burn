@@ -2,6 +2,32 @@
 
 FastAPI backend that accepts graph JSON from the frontend, validates and compiles it into PyTorch, and runs async NN training jobs with websocket metric streaming.
 
+## Remote VLM Inference Node (GX10)
+
+You can offload VLM inference (`/api/vlm/infer`) to a remote compute node so it runs on your GPU machine instead of local CPU.
+
+1. Start the compute node on the GX10:
+
+```bash
+cd /Users/rajpandya/workspace/burn/compute_node
+uv sync
+uv run uvicorn main:app --host 0.0.0.0 --port 8100
+```
+
+2. In backend environment, configure:
+
+```bash
+VLM_COMPUTE_NODE_URL=http://<gx10-ip-or-hostname>:8100
+VLM_COMPUTE_NODE_TIMEOUT_SECONDS=30
+```
+
+3. Restart backend.
+
+Behavior:
+- `POST /api/vlm/infer` uses the compute node automatically when configured.
+- If a local trained VLM artifact is selected via `job_id`, backend keeps local inference for that artifact path.
+- If remote infer fails, backend falls back to local runtime and returns a warning.
+
 ## Remote Training Worker (Modal)
 
 You can offload NN training to a Modal GPU worker.

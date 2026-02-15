@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import DeploymentsPage from './deployments/DeploymentsPage'
+import LandingPage from './launch/LandingPage'
 import ModelHubPage from './launch/ModelHubPage'
 import LinearRegressionBootstrapPage from './linreg/LinearRegressionBootstrapPage'
 import NNBootstrapPage from './nn/NNBootstrapPage'
@@ -11,6 +12,7 @@ import VLMBootstrapPage from './vlm/VLMBootstrapPage'
 const path = window.location.pathname.toLowerCase()
 
 function resolveTitle(currentPath: string): string {
+  if (currentPath.startsWith('/builders')) return 'Burn | Builders'
   if (currentPath.startsWith('/deployments')) return 'Burn | Deployments'
   if (currentPath.startsWith('/rf')) return 'Burn | Random Forest Builder'
   if (currentPath.startsWith('/nn')) return 'Burn | Neural Network Builder'
@@ -23,12 +25,13 @@ function resolveTitle(currentPath: string): string {
 }
 
 function resolveEntry() {
+  if (path.startsWith('/builders')) return <ModelHubPage />
   if (path.startsWith('/deployments')) return <DeploymentsPage />
   if (path.startsWith('/vlm')) return <VLMBootstrapPage />
   if (path.startsWith('/rf')) return <RFBootstrapPage />
   if (path.startsWith('/nn')) return <NNBootstrapPage />
   if (path.startsWith('/linreg')) return <LinearRegressionBootstrapPage />
-  return <ModelHubPage />
+  return <LandingPage />
 }
 
 document.title = resolveTitle(path)

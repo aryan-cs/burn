@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import WaveBackground from './WaveBackground'
 import './modelHub.css'
 
 const NN = 'Neural Network'
@@ -328,6 +329,9 @@ export default function ModelHubPage() {
   const [recAnswer, setRecAnswer] = useState('')
   const [recLoading, setRecLoading] = useState(false)
   const [recSource, setRecSource] = useState('')
+  const launchableScratchCount = SCRATCH_CARDS.filter((card) => card.href !== '#').length
+  const launchablePresetCount = PRESET_CARDS.filter((card) => card.href !== '#').length
+  const activeFamilies = 5
   const [recModel, setRecModel] = useState('')
 
   const openSettings = () => {
@@ -390,14 +394,43 @@ export default function ModelHubPage() {
 
   return (
     <div className="hub-root">
-      <div className="hub-backdrop-grid" />
-      <div className="hub-backdrop-glow" />
+      <WaveBackground />
       <header className="hub-header">
         <div className="hub-header-top">
-          <div>
+          <div className="hub-hero-copy">
             <div className="hub-kicker">Build, Tweak, Deploy.</div>
-            <h1 className="hub-title">Welcome to Burn.</h1>
+            <h1 className="hub-title">From first model to live endpoint in one clean workspace.</h1>
+            <p className="hub-subtitle">
+              Burn helps teams prototype, train, test, and deploy faster with visual model builders
+              and production-ready deployment workflows.
+            </p>
+            <div className="hub-hero-actions">
+              <a href="/nn?mode=scratch" className="hub-cta-button hub-cta-button-primary">
+                Get Started
+              </a>
+              <a href="/deployments" className="hub-cta-button hub-cta-button-secondary">
+                Open Deployments
+              </a>
+            </div>
+            <div className="hub-hero-notes">
+              <span>Digits NN preset runs out-of-the-box with sklearn data.</span>
+              <span>VLM includes live camera testing with YOLOS-Tiny.</span>
+            </div>
           </div>
+          <aside className="hub-hero-metrics" aria-label="Workspace quick stats">
+            <div className="hub-hero-metric">
+              <span>Scratch Builders</span>
+              <strong>{launchableScratchCount}</strong>
+            </div>
+            <div className="hub-hero-metric">
+              <span>Launchable Presets</span>
+              <strong>{launchablePresetCount}</strong>
+            </div>
+            <div className="hub-hero-metric">
+              <span>Model Families</span>
+              <strong>{activeFamilies}</strong>
+            </div>
+          </aside>
         </div>
         <p className="hub-subtitle">
           Burn simplifies the process of building machine models from scratch, allowing anyone to
@@ -405,13 +438,13 @@ export default function ModelHubPage() {
           classifier or a business designing an end-to-end demand forecasting engine, Burn is there
           to help.
         </p>
-        {/* <p className="hub-subtitle">
+        <p className="hub-subtitle">
           New: the Digits NN preset uses the built-in sklearn dataset and works without Kaggle setup.
         </p>
         <p className="hub-subtitle">
           VLM projects use Hugging Face object-detection models (default: YOLOS-Tiny) and include a
           camera testing interface.
-        </p> */}
+        </p>
         <p className="hub-subtitle">
           Need to manage live model endpoints later? Open{' '}
           <a href="/deployments" className="hub-inline-link">

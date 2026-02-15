@@ -24,6 +24,7 @@ export interface WeightSnapshot {
 
 interface TrainingConfig {
   dataset: string
+  location: 'local' | 'cloud'
   epochs: number
   batchSize: number
   optimizer: string
@@ -52,6 +53,7 @@ interface TrainingState {
 
 const DEFAULT_CONFIG: TrainingConfig = {
   dataset: 'mnist',
+  location: 'cloud',
   epochs: 20,
   batchSize: 64,
   optimizer: 'adam',
@@ -84,10 +86,19 @@ export const useTrainingStore = create<TrainingState>((set) => ({
     }),
 
   addMetric: (metric) =>
-    set((s) => ({
-      metrics: [...s.metrics, metric],
-      currentEpoch: metric.epoch,
-    })),
+    set((s) => {
+      const nextMetrics = [...s.metrics]
+      const existingIdx = nextMetrics.findIndex((entry) => entry.epoch === metric.epoch)
+      if (existingIdx >= 0) {
+        nextMetrics[existingIdx] = metric
+      } else {
+        nextMetrics.push(metric)
+      }
+      return {
+        metrics: nextMetrics,
+        currentEpoch: metric.epoch,
+      }
+    }),
 
   updateWeights: (snapshot) =>
     set({ latestWeights: snapshot }),

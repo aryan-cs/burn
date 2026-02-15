@@ -86,6 +86,7 @@ interface DeploymentInferResponse {
 
 type DashboardTab = 'validate' | 'train' | 'infer' | 'deploy'
 type BuildStatus = 'idle' | 'success' | 'error'
+type DeployTarget = 'local' | 'modal'
 
 async function requestJson<T>(
   path: string,
@@ -248,6 +249,7 @@ function App() {
   )
   const [inferenceTopPrediction, setInferenceTopPrediction] = useState<number | null>(null)
   const [deployment, setDeployment] = useState<DeploymentResponse | null>(null)
+  const [deployTarget, setDeployTarget] = useState<DeployTarget>('local')
   const [deployTopPrediction, setDeployTopPrediction] = useState<number | null>(null)
   const [deployOutput, setDeployOutput] = useState('No deployed inference output yet.')
   const isEditingName = Boolean(editingNodeId && editingNodeId === selectedNodeId)
@@ -655,7 +657,8 @@ function App() {
         throw new Error('Add at least one layer before training.')
       }
 
-      const response = await requestJson<TrainResponse>('/api/model/train', {
+      const trainLocation = trainingConfig.location === 'local' ? 'local' : 'cloud'
+      const response = await requestJson<TrainResponse>(`/api/model/train?location=${trainLocation}`, {
         method: 'POST',
         body: JSON.stringify(payload),
       })
@@ -724,7 +727,7 @@ function App() {
         method: 'POST',
         body: JSON.stringify({
           job_id: trainingJobId,
-          target: 'local',
+          target: deployTarget,
           name: `${trainingConfig.dataset}-${trainingJobId.slice(0, 8)}`,
         }),
       })
@@ -916,6 +919,7 @@ function App() {
               trainingConfig={trainingConfig}
               isBackendBusy={isBackendBusy}
               onDatasetChange={(value) => setTrainingConfig({ dataset: value })}
+              onLocationChange={(value) => setTrainingConfig({ location: value })}
               onEpochsChange={(value) => setTrainingConfig({ epochs: value })}
               onBatchSizeChange={(value) => setTrainingConfig({ batchSize: value })}
               onOptimizerChange={(value) => setTrainingConfig({ optimizer: value })}
@@ -957,6 +961,8 @@ function App() {
               trainingJobId={trainingJobId}
               trainingStatus={trainingStatus}
               deployment={deployment}
+              deployTarget={deployTarget}
+              onDeployTargetChange={setDeployTarget}
               deployTopPrediction={deployTopPrediction}
               deployOutput={deployOutput}
               onDeployModel={handleDeployModel}
@@ -967,12 +973,20 @@ function App() {
                 isBackendBusy ||
                 !trainingJobId ||
                 trainingStatus !== 'complete' ||
-                deployment?.status === 'running'
+                (deployment?.status === 'running' &&
+                  deployment?.job_id === trainingJobId &&
+                  deployment?.target === deployTarget)
               }
               refreshDisabled={isBackendBusy || !deployment}
               stopDisabled={isBackendBusy || !deployment || deployment.status !== 'running'}
               inferDisabled={isBackendBusy || !deployment || deployment.status !== 'running'}
-              deployLabel={backendBusyAction === 'deploy' ? 'Deploying...' : 'Deploy Locally'}
+              deployLabel={
+                backendBusyAction === 'deploy'
+                  ? 'Deploying...'
+                  : deployTarget === 'modal'
+                    ? 'Deploy to Modal'
+                    : 'Deploy Locally'
+              }
               refreshLabel={backendBusyAction === 'deploy_status' ? 'Refreshing...' : 'Refresh'}
               stopLabel={backendBusyAction === 'deploy_stop' ? 'Stopping...' : 'Stop Deploy'}
               inferLabel={

@@ -18,6 +18,7 @@ import { BuildTab } from './ui/tabs/BuildTab'
 import { DeployTab } from './ui/tabs/DeployTab'
 import { TestTab } from './ui/tabs/TestTab'
 import { TrainTab } from './ui/tabs/TrainTab'
+import { NnAiCoachPanel } from './ui/tabs/NnAiCoachPanel'
 
 const DEFAULT_LAYER_ROWS = 4
 const DEFAULT_LAYER_COLS = 6
@@ -1161,6 +1162,21 @@ function App() {
           )}
         </button>
         <Viewport lowDetailMode={isLowDetailMode} />
+        <NnAiCoachPanel
+          tab={activeTab === 'deploy' ? 'infer' : activeTab}
+          layerCount={layerCount}
+          neuronCount={neuronCount}
+          weightCount={weightCount}
+          activation={sharedNonOutputActivation}
+          currentEpoch={currentEpoch}
+          totalEpochs={trainingConfig.epochs}
+          trainLoss={latestTrainLoss}
+          testLoss={latestTestLoss}
+          trainAccuracy={latestTrainAccuracy}
+          testAccuracy={latestTestAccuracy}
+          trainingStatus={trainingStatus}
+          inferenceTopPrediction={inferenceTopPrediction}
+        />
         <button
           type="button"
           onClick={() => setIsLowDetailMode((prev) => !prev)}

@@ -213,15 +213,44 @@ button {
   transform: translateY(-50%);
 }
 
-.builder-home-button {
+.wave-background {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.builder-nav-links {
   position: absolute;
   top: 18px;
   right: 18px;
   z-index: 6;
-  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .builder-home-button,
+.builder-deployments-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  background: rgba(20, 20, 20, 0.92);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+  box-shadow: 0 0 16px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(4px);
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
 .align-button,
 .detail-mode-button,
 .nn-ai-coach-toggle {
@@ -256,6 +285,7 @@ button {
 }
 
 .builder-home-button:hover,
+.builder-deployments-button:hover,
 .align-button:hover:not(:disabled),
 .detail-mode-button:hover,
 .nn-ai-coach-toggle:hover {
@@ -272,6 +302,21 @@ button {
   border-color: var(--main-color-border);
   background: rgba(255, 180, 41, 0.16);
   color: var(--main-color-strong);
+}
+
+@media (max-width: 760px) {
+  .builder-nav-links {
+    top: 12px;
+    right: 12px;
+    gap: 6px;
+  }
+
+  .builder-home-button,
+  .builder-deployments-button {
+    min-height: 30px;
+    padding: 0 8px;
+    letter-spacing: 0.06em;
+  }
 }
 
 .tab-panel {
@@ -1977,8 +2022,8 @@ button {
 
 .nn-ai-coach-dock {
   position: absolute;
-  top: 18px;
-  right: 70px;
+  top: 64px;
+  right: 18px;
   bottom: 14px;
   z-index: 4;
   display: flex;

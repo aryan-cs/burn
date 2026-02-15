@@ -227,8 +227,11 @@ export default function DeploymentsPage() {
           <h1 className="deployments-title">Local Deployment Manager</h1>
         </div>
         <div className="deployments-summary">
-          <a href="/" className="deployments-link deployments-icon-link" aria-label="Back to Hub" title="Back to Hub">
-            <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M240-200h120v-240h240v240h120v-360L480-740 240-560v360Zm-80 80v-480l320-240 320 240v480H520v-240h-80v240H160Zm320-350Z"/></svg>
+          <a href="/builders" className="deployments-link deployments-nav-btn">
+            Model Builder
+          </a>
+          <a href="/" className="deployments-link deployments-nav-btn">
+            Home
           </a>
         </div>
       </header>

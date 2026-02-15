@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,6 +24,10 @@ class RuntimeLoadResult:
 class VLMRuntime:
     def __init__(self) -> None:
         self.device = self._select_device()
+        self._is_cuda = self.device.type == "cuda"
+        self._use_autocast = self._is_cuda and os.getenv("COMPUTE_NODE_USE_AUTOCAST", "1").strip() != "0"
+        self._use_fp16_model = self._is_cuda and os.getenv("COMPUTE_NODE_USE_FP16_MODEL", "0").strip() == "1"
+        self._configure_acceleration_flags()
         self._backend: str | None = None
         self._model_id = DEFAULT_VLM_MODEL_ID
         self._hf_processor: Any = None
@@ -40,6 +46,43 @@ class VLMRuntime:
     def device_name(self) -> str:
         return str(self.device)
 
+    @property
+    def acceleration_profile(self) -> dict[str, Any]:
+        return {
+            "device": self.device_name,
+            "autocast": self._use_autocast,
+            "fp16_model": self._use_fp16_model,
+        }
+
+    def _configure_acceleration_flags(self) -> None:
+        if not self._is_cuda:
+            return
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cudnn.benchmark = True
+        try:
+            torch.set_float32_matmul_precision("high")
+        except Exception:
+            pass
+
+    def _autocast_context(self):
+        if not self._use_autocast:
+            return nullcontext()
+        return torch.autocast(device_type="cuda", dtype=torch.float16)
+
+    def _maybe_cast_model_for_speed(self, model: torch.nn.Module) -> torch.nn.Module:
+        if self._use_fp16_model:
+            model = model.half()
+        return model
+
+    def _current_model_dtype(self) -> torch.dtype:
+        assert self._base_model is not None
+        try:
+            first_param = next(self._base_model.parameters())
+            return first_param.dtype
+        except StopIteration:
+            return torch.float32
+
     def ensure_model(self, model_id: str = DEFAULT_VLM_MODEL_ID) -> RuntimeLoadResult:
         if self._base_model is not None and model_id == self._model_id:
             return RuntimeLoadResult(
@@ -55,6 +98,7 @@ class VLMRuntime:
             processor = AutoImageProcessor.from_pretrained(model_id)
             model = AutoModelForObjectDetection.from_pretrained(model_id)
             model.to(self.device)
+            model = self._maybe_cast_model_for_speed(model)
             model.eval()
             label_map = {
                 int(label_id): str(label_name)
@@ -97,6 +141,7 @@ class VLMRuntime:
                 )
 
             model.to(self.device)
+            model = self._maybe_cast_model_for_speed(model)
             model.eval()
             self._base_model = model
             self._hf_processor = None
@@ -120,19 +165,25 @@ class VLMRuntime:
     ) -> dict[str, Any]:
         self.ensure_model(model_id)
         assert self._base_model is not None
+        model_dtype = self._current_model_dtype()
         width, height = image.size
 
         if self._backend == "huggingface" and self._hf_processor is not None:
             inputs = self._hf_processor(images=image, return_tensors="pt")
-            pixel_values = inputs["pixel_values"].to(self.device)
+            pixel_values = inputs["pixel_values"].to(
+                self.device,
+                dtype=model_dtype if model_dtype == torch.float16 else None,
+                non_blocking=True,
+            )
             pixel_mask = inputs.get("pixel_mask")
             if pixel_mask is not None:
-                pixel_mask = pixel_mask.to(self.device)
-            with torch.no_grad():
-                if pixel_mask is None:
-                    outputs = self._base_model(pixel_values=pixel_values)
-                else:
-                    outputs = self._base_model(pixel_values=pixel_values, pixel_mask=pixel_mask)
+                pixel_mask = pixel_mask.to(self.device, non_blocking=True)
+            with torch.inference_mode():
+                with self._autocast_context():
+                    if pixel_mask is None:
+                        outputs = self._base_model(pixel_values=pixel_values)
+                    else:
+                        outputs = self._base_model(pixel_values=pixel_values, pixel_mask=pixel_mask)
             target_sizes = torch.tensor([[height, width]], device=self.device)
             results = self._hf_processor.post_process_object_detection(
                 outputs,
@@ -164,9 +215,14 @@ class VLMRuntime:
 
         from torchvision.transforms.functional import to_tensor
 
-        tensor = to_tensor(image).to(self.device)
-        with torch.no_grad():
-            output = self._base_model([tensor])[0]
+        tensor = to_tensor(image).to(
+            self.device,
+            dtype=model_dtype if model_dtype == torch.float16 else None,
+            non_blocking=True,
+        )
+        with torch.inference_mode():
+            with self._autocast_context():
+                output = self._base_model([tensor])[0]
         detections: list[dict[str, Any]] = []
         for box, label, score in zip(output["boxes"], output["labels"], output["scores"]):
             score_value = float(score.item())
@@ -193,6 +249,17 @@ class VLMRuntime:
             "detections": detections,
             "warning": self._load_warning,
         }
+
+    def warmup(self, model_id: str = DEFAULT_VLM_MODEL_ID) -> RuntimeLoadResult:
+        load = self.ensure_model(model_id)
+        image = Image.new("RGB", (320, 320), color=(0, 0, 0))
+        self.detect(
+            image,
+            score_threshold=0.99,
+            max_detections=1,
+            model_id=model_id,
+        )
+        return load
 
 
 vlm_runtime = VLMRuntime()

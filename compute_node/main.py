@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -12,6 +13,13 @@ from PIL import Image
 from pydantic import BaseModel, field_validator
 
 from vlm_runtime import DEFAULT_VLM_MODEL_ID, vlm_runtime
+
+logger = logging.getLogger("compute_node.vlm")
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    )
 
 
 class VLMInferRequest(BaseModel):
@@ -61,20 +69,38 @@ def _decode_data_url_image(value: str) -> Image.Image:
         raise HTTPException(status_code=400, detail={"message": f"Could not decode image payload: {exc}"}) from exc
 
 
-def _run_infer(payload: VLMInferRequest) -> dict[str, Any]:
+def _run_infer(payload: VLMInferRequest, *, source: str) -> dict[str, Any]:
     image = _decode_data_url_image(payload.image_base64)
-    return vlm_runtime.detect(
+    result = vlm_runtime.detect(
         image,
         model_id=payload.model_id,
         score_threshold=payload.score_threshold,
         max_detections=payload.max_detections,
     )
+    logger.info(
+        "Compute node infer served: source=%s model_id=%s backend=%s device=%s detections=%d",
+        source,
+        result.get("runtime_model_id"),
+        result.get("runtime_backend"),
+        result.get("runtime_device"),
+        len(result.get("detections", [])),
+    )
+    return result
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     # Warm up once at startup so the first request is less likely to stall.
-    vlm_runtime.ensure_model(DEFAULT_VLM_MODEL_ID)
+    warmup = vlm_runtime.warmup(DEFAULT_VLM_MODEL_ID)
+    accel = vlm_runtime.acceleration_profile
+    logger.info(
+        "Compute node startup complete: default_model=%s backend=%s device=%s autocast=%s fp16_model=%s",
+        warmup.model_id,
+        warmup.backend,
+        warmup.device,
+        accel["autocast"],
+        accel["fp16_model"],
+    )
     yield
 
 
@@ -90,13 +116,13 @@ app.add_middleware(
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "device": vlm_runtime.device_name}
+async def health() -> dict[str, Any]:
+    return {"status": "ok", **vlm_runtime.acceleration_profile}
 
 
 @app.post("/api/v1/vlm/infer")
 async def vlm_infer(payload: VLMInferRequest) -> dict[str, Any]:
-    return _run_infer(payload)
+    return _run_infer(payload, source="http")
 
 
 @app.websocket("/ws/v1/vlm/infer")
@@ -112,7 +138,7 @@ async def vlm_infer_ws(websocket: WebSocket):
                 continue
 
             try:
-                result = _run_infer(payload)
+                result = _run_infer(payload, source="ws")
                 await websocket.send_json({"type": "infer_result", **result})
             except HTTPException as exc:
                 detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
@@ -126,4 +152,8 @@ async def vlm_infer_ws(websocket: WebSocket):
 if __name__ == "__main__":
     import uvicorn
 
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    )
     uvicorn.run("main:app", host="0.0.0.0", port=8100, reload=False)

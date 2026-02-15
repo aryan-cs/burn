@@ -37,3 +37,19 @@ VLM_COMPUTE_NODE_TIMEOUT_SECONDS=30
 ```
 
 Then restart the backend. `POST /api/vlm/infer` will automatically use the compute node for inference when no local trained artifact is selected.
+
+## Performance knobs (GPU)
+
+These are read by `compute_node` on startup:
+
+```bash
+# Default 1 on CUDA: enables AMP autocast for faster inference
+COMPUTE_NODE_USE_AUTOCAST=1
+
+# Optional: convert model weights to fp16 (more aggressive, may affect stability)
+COMPUTE_NODE_USE_FP16_MODEL=0
+```
+
+Current acceleration settings are visible at:
+
+- `GET /health` (returns `device`, `autocast`, `fp16_model`)

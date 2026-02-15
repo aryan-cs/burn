@@ -27,12 +27,14 @@ class DeploymentEntry:
     target: str
     endpoint_path: str
     created_at: datetime
+    model_family: str = "nn"
     name: str | None = None
     last_used_at: datetime | None = None
     request_count: int = 0
     model: Any | None = None
     input_shape: list[int] | None = None
     num_classes: int | None = None
+    runtime_config: dict[str, Any] | None = None
     logs: list[DeploymentLogEntry] | None = None
 
 
@@ -48,23 +50,28 @@ class DeploymentRegistry:
         job_id: str,
         target: str,
         name: str | None,
-        model: Any,
+        model: Any | None,
         input_shape: list[int] | None,
         num_classes: int | None,
+        model_family: str = "nn",
+        endpoint_path: str | None = None,
+        runtime_config: dict[str, Any] | None = None,
     ) -> DeploymentEntry:
         deployment_id = uuid4().hex
-        endpoint_path = f"/api/deploy/{deployment_id}/infer"
+        resolved_endpoint_path = endpoint_path or f"/api/deploy/{deployment_id}/infer"
         entry = DeploymentEntry(
             deployment_id=deployment_id,
             job_id=job_id,
             status="running",
             target=target,
-            endpoint_path=endpoint_path,
+            endpoint_path=resolved_endpoint_path,
             created_at=datetime.now(timezone.utc),
+            model_family=model_family,
             name=name,
             model=model,
             input_shape=input_shape,
             num_classes=num_classes,
+            runtime_config=runtime_config,
             logs=[],
         )
         self._entries[deployment_id] = entry
@@ -73,7 +80,12 @@ class DeploymentRegistry:
             level="info",
             event="deployment_created",
             message="Deployment created and running.",
-            details={"job_id": job_id, "target": target, "endpoint_path": endpoint_path},
+            details={
+                "job_id": job_id,
+                "target": target,
+                "endpoint_path": resolved_endpoint_path,
+                "model_family": model_family,
+            },
             persist=False,
         )
         self._persist()
@@ -198,6 +210,7 @@ class DeploymentRegistry:
             deployment_id = str(item.get("deployment_id", "")).strip()
             job_id = str(item.get("job_id", "")).strip()
             target = str(item.get("target", "local")).strip() or "local"
+            model_family = str(item.get("model_family", "nn")).strip().lower() or "nn"
             endpoint_path = str(item.get("endpoint_path", "")).strip()
             if not deployment_id or not job_id:
                 continue
@@ -232,12 +245,14 @@ class DeploymentRegistry:
                 target=target,
                 endpoint_path=endpoint_path,
                 created_at=created_at,
+                model_family=model_family,
                 name=_normalize_optional_str(item.get("name")),
                 last_used_at=last_used_at,
                 request_count=_coerce_non_negative_int(item.get("request_count")),
                 model=None,
                 input_shape=_deserialize_int_list(item.get("input_shape")),
                 num_classes=_coerce_optional_int(item.get("num_classes")),
+                runtime_config=_deserialize_dict(item.get("runtime_config")),
                 logs=logs[-MAX_LOG_ITEMS:],
             )
             self._entries[deployment_id] = entry
@@ -254,12 +269,14 @@ class DeploymentRegistry:
                     "status": entry.status,
                     "target": entry.target,
                     "endpoint_path": entry.endpoint_path,
+                    "model_family": entry.model_family,
                     "created_at": entry.created_at.isoformat(),
                     "name": entry.name,
                     "last_used_at": entry.last_used_at.isoformat() if entry.last_used_at else None,
                     "request_count": entry.request_count,
                     "input_shape": entry.input_shape,
                     "num_classes": entry.num_classes,
+                    "runtime_config": _make_json_safe(entry.runtime_config),
                     "logs": [
                         {
                             "timestamp": log.timestamp.isoformat(),
@@ -335,6 +352,12 @@ def _deserialize_int_list(value: Any) -> list[int] | None:
         except (TypeError, ValueError):
             return None
     return out
+
+
+def _deserialize_dict(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    return {str(key): item for key, item in value.items()}
 
 
 def _deserialize_logs(value: Any) -> list[DeploymentLogEntry]:

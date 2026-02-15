@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-import json
-
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from core.job_registry import job_registry
@@ -24,6 +21,13 @@ async def training_stream(websocket: WebSocket, job_id: str):
     cursor = 0
 
     try:
+        await websocket.send_json(
+            {
+                "type": "ws_connected",
+                "job_id": job_id,
+                "status": entry.status,
+            }
+        )
         while True:
             messages, terminal = await job_registry.wait_for_update(job_id, cursor, timeout=0.25)
             for message in messages:
@@ -31,18 +35,6 @@ async def training_stream(websocket: WebSocket, job_id: str):
                 cursor += 1
 
             if terminal and cursor >= len(entry.messages):
-                break
-
-            try:
-                incoming = await asyncio.wait_for(websocket.receive_text(), timeout=0.01)
-                payload = json.loads(incoming)
-                if payload.get("command") == "stop":
-                    job_registry.request_stop(job_id)
-            except asyncio.TimeoutError:
-                pass
-            except json.JSONDecodeError:
-                await websocket.send_json({"type": "error", "message": "Invalid websocket command payload"})
-            except WebSocketDisconnect:
                 break
 
     except WebSocketDisconnect:

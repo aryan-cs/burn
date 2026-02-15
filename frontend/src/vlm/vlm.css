@@ -1,0 +1,241 @@
+.app-tab-strip-three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.app-tab-strip-three .app-tab-indicator {
+  width: 33.3333%;
+}
+
+.vlm-config-control {
+  width: 160px;
+}
+
+.vlm-stage-card {
+  margin-top: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-2);
+  padding: 10px;
+}
+
+.vlm-stage-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vlm-action-button {
+  min-height: 36px;
+}
+
+.vlm-inline-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.vlm-log-list {
+  min-height: 140px;
+  max-height: 260px;
+}
+
+.vlm-log-item {
+  color: rgba(232, 240, 250, 0.92);
+}
+
+.vlm-slider-wrap {
+  margin-top: 10px;
+  padding: 0 6px;
+}
+
+.vlm-score-slider {
+  width: 100%;
+}
+
+.vlm-global-feedback {
+  margin-top: 0;
+}
+
+.vlm-test-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.vlm-canvas-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.vlm-feed-card {
+  border-radius: 8px;
+  border: 1px solid #283244;
+  background: rgba(6, 9, 14, 0.94);
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+}
+
+.vlm-feed-card p {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(240, 248, 255, 0.64);
+  font-family:
+    "IBM Plex Mono",
+    "JetBrains Mono",
+    monospace;
+}
+
+.vlm-video,
+.vlm-canvas {
+  width: 100%;
+  height: 152px;
+  border-radius: 7px;
+  border: 1px solid #1f2a3a;
+  background: #020408;
+  object-fit: cover;
+}
+
+.vlm-detection-list {
+  border-radius: 10px;
+  border: 1px solid #273444;
+  background: rgba(10, 15, 22, 0.92);
+  min-height: 95px;
+  max-height: 190px;
+  overflow-y: auto;
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.vlm-detection-list p {
+  color: rgba(240, 248, 255, 0.62);
+  font-size: 13px;
+}
+
+.vlm-detection-item {
+  border-radius: 7px;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-3);
+  padding: 7px 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.vlm-viewport-panel {
+  position: relative;
+  overflow: hidden;
+  background: #02040a;
+}
+
+.vlm-viewport-root {
+  position: absolute;
+  inset: 0;
+}
+
+.vlm-viewport-topbar {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
+  min-width: min(780px, calc(100% - 72px));
+  max-width: calc(100% - 72px);
+  border: 1px solid rgba(138, 190, 230, 0.26);
+  border-radius: 10px;
+  background: rgba(5, 14, 25, 0.8);
+  padding: 8px 10px;
+  display: grid;
+  gap: 7px;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.vlm-viewport-heading {
+  color: #e8f6ff;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-align: center;
+  font-family:
+    "IBM Plex Mono",
+    "JetBrains Mono",
+    monospace;
+}
+
+.vlm-viewport-chips {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.vlm-chip {
+  border: 1px solid rgba(129, 177, 214, 0.35);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: #d7edff;
+  background: rgba(16, 33, 53, 0.72);
+}
+
+.vlm-stage-focus {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  width: min(360px, calc(100% - 78px));
+  border: 1px solid rgba(128, 176, 214, 0.34);
+  border-radius: 10px;
+  background: rgba(5, 14, 25, 0.86);
+  padding: 10px;
+  z-index: 5;
+}
+
+.vlm-stage-focus-title {
+  color: #e8f7ff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.vlm-stage-focus-detail {
+  margin-top: 2px;
+  color: #9ac2e6;
+  font-size: 11px;
+  font-family:
+    "IBM Plex Mono",
+    "JetBrains Mono",
+    monospace;
+}
+
+.vlm-stage-focus p {
+  margin-top: 6px;
+  color: rgba(221, 236, 250, 0.78);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 1180px) {
+  .vlm-canvas-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vlm-video,
+  .vlm-canvas {
+    height: 130px;
+  }
+
+  .vlm-inline-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .vlm-inline-actions {
+    grid-template-columns: 1fr;
+  }
+}

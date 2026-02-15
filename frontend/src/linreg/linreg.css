@@ -1,0 +1,453 @@
+.linreg-viewport-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px 20px 18px;
+  gap: 14px;
+  background:
+    radial-gradient(circle at 12% 20%, rgba(255, 180, 41, 0.14), transparent 45%),
+    radial-gradient(circle at 82% 5%, rgba(255, 180, 41, 0.08), transparent 42%),
+    linear-gradient(180deg, #09090c 0%, #070709 100%);
+}
+
+.linreg-viewport-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 14px;
+  border: 1px solid rgba(255, 180, 41, 0.22);
+  background: rgba(14, 14, 18, 0.9);
+  border-radius: 12px;
+}
+
+.linreg-kicker {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 222, 168, 0.82);
+  font-family:
+    "IBM Plex Mono",
+    "JetBrains Mono",
+    monospace;
+}
+
+.linreg-viewport-header h2 {
+  margin-top: 8px;
+  font-size: 27px;
+  line-height: 1.1;
+  color: #fff6df;
+}
+
+.linreg-viewport-header p {
+  margin-top: 8px;
+  max-width: 560px;
+  color: rgba(255, 248, 232, 0.74);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.linreg-view-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 260px;
+}
+
+.linreg-view-stats div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(8, 8, 12, 0.72);
+}
+
+.linreg-view-stats span {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.linreg-view-stats strong {
+  font-size: 16px;
+  color: #fff5dc;
+}
+
+.linreg-pipeline-shell {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 180, 41, 0.2);
+  border-radius: 12px;
+  background: rgba(12, 12, 16, 0.86);
+}
+
+.linreg-pipeline-node-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.linreg-pipeline-node {
+  min-width: 180px;
+  max-width: 220px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  background: rgba(18, 18, 22, 0.95);
+  color: #f6f6f6;
+  text-align: left;
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.linreg-pipeline-node:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 180, 41, 0.5);
+}
+
+.linreg-pipeline-node-active {
+  border-color: rgba(255, 180, 41, 0.72);
+  background: rgba(41, 31, 18, 0.95);
+  box-shadow: 0 0 0 1px rgba(255, 180, 41, 0.36) inset;
+}
+
+.linreg-pipeline-node-role {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-family:
+    "IBM Plex Mono",
+    "JetBrains Mono",
+    monospace;
+  border: 1px solid transparent;
+}
+
+.linreg-pipeline-node-role-input {
+  color: #fff0cf;
+  background: rgba(255, 180, 41, 0.2);
+  border-color: rgba(255, 180, 41, 0.42);
+}
+
+.linreg-pipeline-node-role-hidden {
+  color: #d8f2ff;
+  background: rgba(111, 213, 255, 0.16);
+  border-color: rgba(111, 213, 255, 0.4);
+}
+
+.linreg-pipeline-node-role-output {
+  color: #d6ffd8;
+  background: rgba(116, 228, 126, 0.16);
+  border-color: rgba(116, 228, 126, 0.42);
+}
+
+.linreg-pipeline-node h3 {
+  margin-top: 8px;
+  font-size: 16px;
+  color: #fff;
+}
+
+.linreg-pipeline-node p {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.linreg-node-size-chip {
+  margin-top: 10px;
+  display: inline-flex;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.86);
+  font-family:
+    "IBM Plex Mono",
+    "JetBrains Mono",
+    monospace;
+}
+
+.linreg-pipeline-arrow {
+  color: rgba(255, 196, 99, 0.92);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.linreg-viewport-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(300px, 0.7fr);
+  gap: 12px;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.linreg-viewport-card {
+  min-height: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(12, 12, 16, 0.9);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.linreg-viewport-card:first-child {
+  min-height: clamp(520px, 66vh, 860px);
+}
+
+.linreg-viewport-card h3 {
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.linreg-scatter-shell {
+  margin-top: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.linreg-scatter-svg {
+  width: 100%;
+  height: 100%;
+  min-height: clamp(460px, 60vh, 760px);
+}
+
+.linreg-scatter-bg {
+  fill: rgba(4, 9, 15, 0.96);
+  stroke: rgba(116, 169, 255, 0.2);
+  stroke-width: 1.2;
+}
+
+.linreg-scatter-axis {
+  stroke: rgba(203, 226, 255, 0.48);
+  stroke-width: 1.2;
+}
+
+.linreg-scatter-grid {
+  stroke: rgba(129, 167, 216, 0.12);
+  stroke-width: 1;
+}
+
+.linreg-scatter-point {
+  fill: rgba(255, 190, 74, 0.82);
+  stroke: rgba(255, 229, 170, 0.95);
+  stroke-width: 0.7;
+}
+
+.linreg-scatter-fit-line {
+  stroke: rgba(96, 255, 171, 0.97);
+  stroke-width: 2.6;
+  filter: drop-shadow(0 0 8px rgba(92, 255, 160, 0.28));
+}
+
+.linreg-scatter-cursor {
+  stroke: rgba(111, 213, 255, 0.82);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+}
+
+.linreg-scatter-prediction {
+  fill: rgba(111, 213, 255, 0.95);
+  stroke: rgba(233, 251, 255, 0.96);
+  stroke-width: 1;
+}
+
+.linreg-scatter-label {
+  fill: rgba(229, 242, 255, 0.82);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  font-family:
+    "IBM Plex Mono",
+    "JetBrains Mono",
+    monospace;
+}
+
+.linreg-scatter-tick {
+  fill: rgba(210, 229, 255, 0.7);
+  font-size: 10px;
+  text-anchor: end;
+  font-family:
+    "IBM Plex Mono",
+    "JetBrains Mono",
+    monospace;
+}
+
+.linreg-scatter-tick-x {
+  text-anchor: middle;
+}
+
+.linreg-scatter-empty {
+  margin-top: 12px;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  padding: 18px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+}
+
+.linreg-equation-line {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 180, 41, 0.28);
+  background: rgba(255, 180, 41, 0.08);
+  color: #ffe9ba;
+  font-family:
+    "IBM Plex Mono",
+    "JetBrains Mono",
+    monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.linreg-coeff-list {
+  margin-top: 12px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.linreg-coeff-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(10, 10, 13, 0.86);
+  color: rgba(255, 255, 255, 0.82);
+  font-family:
+    "IBM Plex Mono",
+    "JetBrains Mono",
+    monospace;
+  font-size: 12px;
+}
+
+.linreg-equation-placeholder {
+  margin-top: 14px;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 13px;
+}
+
+.linreg-editor-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.field-group-checkbox {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.field-group-checkbox input[type='checkbox'] {
+  accent-color: var(--main-color);
+  width: 16px;
+  height: 16px;
+}
+
+.linreg-train-graphs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.linreg-train-chart {
+  min-width: 0;
+}
+
+.linreg-train-chart .panel-chart {
+  height: 210px;
+}
+
+.linreg-train-metrics {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.linreg-train-status-line {
+  margin-top: 10px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
+}
+
+.linreg-inference-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.linreg-test-actions-row {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.linreg-sample-index {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-family:
+    "IBM Plex Mono",
+    "JetBrains Mono",
+    monospace;
+}
+
+.linreg-inference-output {
+  margin-top: 10px;
+  min-height: 170px;
+  max-height: 260px;
+}
+
+@media (max-width: 1400px) {
+  .linreg-viewport-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .linreg-view-stats {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+@media (max-width: 1080px) {
+  .linreg-viewport-header {
+    flex-direction: column;
+  }
+
+  .linreg-view-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .linreg-train-graphs,
+  .linreg-train-metrics,
+  .linreg-inference-grid,
+  .linreg-editor-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,11 +1,14 @@
 import { useMemo } from 'react'
+import * as THREE from 'three'
 import type { LayerNode } from '../../store/graphStore'
+import type { TrainingFlowPhase } from '../nodes/LayerNode'
 import {
   LAYER_NODE_SPACING,
   LAYER_NODE_Z_OFFSET,
   buildLayerWorldNodePositions,
   getLayerGridSize,
 } from '../../utils/layerLayout'
+import { WeightVisual } from './WeightVisual'
 
 const MAX_SEGMENTS_FULL_DETAIL = 6000
 const LOW_DETAIL_ANCHORS: Array<[number, number]> = [
@@ -20,9 +23,24 @@ interface ConnectionProps {
   sourceNode: LayerNode
   targetNode: LayerNode
   lowDetailMode: boolean
+  trainingFlow?: {
+    active: boolean
+    intensity: number
+    value: number
+    phase: TrainingFlowPhase | null
+  }
 }
 
-export function Connection({ sourceNode, targetNode, lowDetailMode }: ConnectionProps) {
+const EDGE_VALUE_LOW_COLOR = new THREE.Color('#ff4747')
+const EDGE_VALUE_MID_COLOR = new THREE.Color('#ffffff')
+const EDGE_VALUE_HIGH_COLOR = new THREE.Color('#4eff8e')
+
+export function Connection({
+  sourceNode,
+  targetNode,
+  lowDetailMode,
+  trainingFlow,
+}: ConnectionProps) {
   const segmentPositions = useMemo(() => {
     if (lowDetailMode) {
       return buildLowDetailSegments(sourceNode, targetNode)
@@ -47,20 +65,63 @@ export function Connection({ sourceNode, targetNode, lowDetailMode }: Connection
 
     return new Float32Array(values)
   }, [sourceNode, targetNode, lowDetailMode])
+  const lineColor = useMemo(
+    () => getEdgeColor(trainingFlow?.value ?? 0),
+    [trainingFlow?.value]
+  )
+  const flowIntensity = Math.min(1, Math.max(0, trainingFlow?.intensity ?? 0))
+  const hasTrainingFlow = Boolean(trainingFlow)
+  const lineOpacity = hasTrainingFlow
+    ? 0.3 + flowIntensity * 0.56
+    : lowDetailMode
+      ? 0.55
+      : 0.38
+  const pulseCurve = useMemo(() => {
+    const sourceCenter = new THREE.Vector3(
+      sourceNode.position[0],
+      sourceNode.position[1],
+      sourceNode.position[2] + LAYER_NODE_Z_OFFSET
+    )
+    const targetCenter = new THREE.Vector3(
+      targetNode.position[0],
+      targetNode.position[1],
+      targetNode.position[2] + LAYER_NODE_Z_OFFSET
+    )
+    if (trainingFlow?.phase === 'backward') {
+      return new THREE.LineCurve3(targetCenter, sourceCenter)
+    }
+    return new THREE.LineCurve3(sourceCenter, targetCenter)
+  }, [
+    sourceNode.position,
+    targetNode.position,
+    trainingFlow?.phase,
+  ])
+  const pulseSpeed = trainingFlow?.active
+    ? 0.65 + flowIntensity * 1.45
+    : 0
+  const pulseSize = trainingFlow?.active
+    ? 0.035 + flowIntensity * 0.025
+    : 0.035
 
   if (segmentPositions.length === 0) return null
 
   return (
-    <lineSegments>
-      <bufferGeometry>
-        <bufferAttribute attach="attributes-position" args={[segmentPositions, 3]} />
-      </bufferGeometry>
-      <lineBasicMaterial
-        color={lowDetailMode ? '#5f6268' : '#525252'}
-        transparent
-        opacity={lowDetailMode ? 0.55 : 0.38}
-      />
-    </lineSegments>
+    <group>
+      <lineSegments>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" args={[segmentPositions, 3]} />
+        </bufferGeometry>
+        <lineBasicMaterial
+          color={hasTrainingFlow ? lineColor : lowDetailMode ? '#5f6268' : '#525252'}
+          transparent
+          opacity={lineOpacity}
+        />
+      </lineSegments>
+
+      {trainingFlow?.active ? (
+        <WeightVisual curve={pulseCurve} speed={pulseSpeed} color={lineColor} size={pulseSize} />
+      ) : null}
+    </group>
   )
 }
 
@@ -119,4 +180,15 @@ function pushSegment(
   target: [number, number, number]
 ) {
   values.push(source[0], source[1], source[2], target[0], target[1], target[2])
+}
+
+function getEdgeColor(value: number): string {
+  const clamped = Math.min(1, Math.max(-1, value))
+  const color = EDGE_VALUE_MID_COLOR.clone()
+  if (clamped >= 0) {
+    color.lerp(EDGE_VALUE_HIGH_COLOR, clamped)
+  } else {
+    color.lerp(EDGE_VALUE_LOW_COLOR, Math.abs(clamped))
+  }
+  return `#${color.getHexString()}`
 }

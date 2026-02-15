@@ -13,6 +13,8 @@ from routers.model import router as model_router
 from routers.rf_datasets import router as rf_datasets_router
 from routers.rf_model import router as rf_model_router
 from routers.rf_websocket import router as rf_websocket_router
+from routers.vlm_model import router as vlm_model_router
+from routers.vlm_websocket import router as vlm_websocket_router
 from routers.websocket import router as websocket_router
 from routers.ml_model import router as ml_model_router
 from routers.ml_websocket import router as ml_ws_router
@@ -48,6 +50,8 @@ app.include_router(ai_coach_router)
 app.include_router(rf_model_router)
 app.include_router(rf_datasets_router)
 app.include_router(rf_websocket_router)
+app.include_router(vlm_model_router)
+app.include_router(vlm_websocket_router)
 
 
 @app.get("/health")

@@ -2,6 +2,47 @@
 
 FastAPI backend that accepts graph JSON from the frontend, validates and compiles it into PyTorch, and runs async NN training jobs with websocket metric streaming.
 
+## Remote Training Worker (Modal)
+
+You can offload NN training to a Modal GPU worker.
+
+1. Deploy the worker from the backend directory:
+
+```bash
+cd /Users/yax/programming/burn/backend
+modal deploy modal_worker.py
+```
+
+2. In the backend environment, configure:
+
+```bash
+TRAINING_BACKEND=modal
+MODAL_APP_NAME=burn-training
+MODAL_FUNCTION_NAME=train_job_remote
+# Optional: MODAL_ENVIRONMENT_NAME=<your-modal-environment>
+```
+
+3. Start backend normally (`uv run python main.py` or uvicorn).
+
+When `TRAINING_BACKEND=modal`, `/api/model/train` runs the full training loop on Modal and then persists the returned `.pt` weights into the normal local artifacts directory.
+
+Optional Modal speed knobs (set in backend env before starting API):
+
+```bash
+# Try torch.compile in remote worker (default: 1)
+MODAL_USE_TORCH_COMPILE=1
+
+# Multiply training batch size from graph payload (default: 1)
+MODAL_BATCH_SIZE_MULTIPLIER=2
+
+# Evaluate test split every N epochs instead of every epoch (default: 1)
+MODAL_EVAL_EVERY=2
+
+# Cap train/test batches per epoch for very fast iteration (default: 0 = full)
+MODAL_MAX_TRAIN_BATCHES=0
+MODAL_MAX_TEST_BATCHES=0
+```
+
 ## Run
 
 ```bash

@@ -79,7 +79,7 @@ def test_train_rejects_shape_for_selected_dataset(client) -> None:
 
 
 def test_train_stop_and_export(monkeypatch, client, tmp_path) -> None:
-    async def fake_run_training_job(job_id, compiled, training, artifacts_dir):
+    async def fake_run_training_job(job_id, compiled, training, artifacts_dir, backend_override=None):
         entry = job_registry.get(job_id)
         assert entry is not None
         job_registry.set_status(job_id, "running")

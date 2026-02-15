@@ -16,6 +16,8 @@ interface DeployTabProps {
   trainingJobId: string | null
   trainingStatus: string
   deployment: DeploymentView | null
+  deployTarget: 'local' | 'modal'
+  onDeployTargetChange: (target: 'local' | 'modal') => void
   deployTopPrediction: number | null
   deployOutput: string
   onDeployModel: () => void
@@ -36,6 +38,8 @@ export function DeployTab({
   trainingJobId,
   trainingStatus,
   deployment,
+  deployTarget,
+  onDeployTargetChange,
   deployTopPrediction,
   deployOutput,
   onDeployModel,
@@ -53,12 +57,19 @@ export function DeployTab({
 }: DeployTabProps) {
   const endpointUrl =
     deployment
-      ? `${resolveBackendBaseUrl()}${deployment.endpoint_path}`
+      ? resolveDeploymentEndpointUrl(deployment.target, deployment.endpoint_path)
       : null
   const endpointLiteral = endpointUrl
     ? toPythonSingleQuotedString(endpointUrl)
     : "'http://127.0.0.1:8000/api/deploy/<deployment_id>/infer'"
-  const pythonSnippet = useMemo(() => buildPythonClientSnippet(endpointLiteral), [endpointLiteral])
+  const needsDeploymentIdInPayload = deployment?.target === 'modal'
+  const deploymentIdLiteral = deployment?.deployment_id
+    ? toPythonSingleQuotedString(deployment.deployment_id)
+    : "'<deployment_id>'"
+  const pythonSnippet = useMemo(
+    () => buildPythonClientSnippet(endpointLiteral, needsDeploymentIdInPayload, deploymentIdLiteral),
+    [endpointLiteral, needsDeploymentIdInPayload, deploymentIdLiteral]
+  )
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle')
 
   useEffect(() => {
@@ -104,6 +115,30 @@ export function DeployTab({
             <span className="deploy-summary-label">Requests</span>
             <span className="deploy-summary-value">{deployment?.request_count ?? 0}</span>
           </div>
+          <div className="deploy-summary-item">
+            <span className="deploy-summary-label">Selected Target</span>
+            <span className="deploy-summary-value">{deployTarget}</span>
+          </div>
+        </div>
+
+        <div className="deploy-endpoint-card">
+          <p className="deploy-endpoint-title">Deploy Target</p>
+          <div className="deploy-target-toggle" role="group" aria-label="Deployment target">
+            <button
+              type="button"
+              onClick={() => onDeployTargetChange('local')}
+              className={`btn btn-ghost ${deployTarget === 'local' ? 'deploy-target-active' : ''}`}
+            >
+              Local
+            </button>
+            <button
+              type="button"
+              onClick={() => onDeployTargetChange('modal')}
+              className={`btn btn-ghost ${deployTarget === 'modal' ? 'deploy-target-active' : ''}`}
+            >
+              Modal
+            </button>
+          </div>
         </div>
 
         <div className="deploy-endpoint-card">
@@ -147,6 +182,13 @@ export function DeployTab({
               {'\n'}
               payload = {'{'}
               {'\n'}
+              {needsDeploymentIdInPayload ? (
+                <>
+                  {'    '}
+                  <span className="py-string">'deployment_id'</span>: <span className="py-string">{deploymentIdLiteral}</span>,
+                  {'\n'}
+                </>
+              ) : null}
               {'    '}
               <span className="py-string">'inputs'</span>: [[[0.0 <span className="py-keyword">for</span> _ <span className="py-keyword">in</span> <span className="py-number">range</span>(<span className="py-number">28</span>)] <span className="py-keyword">for</span> _ <span className="py-keyword">in</span> <span className="py-number">range</span>(<span className="py-number">28</span>)]],
               {'\n'}
@@ -222,6 +264,17 @@ function resolveBackendBaseUrl(): string {
   return `${protocol}//${hostname}:8000`
 }
 
+function resolveDeploymentEndpointUrl(target: string, endpointPath: string): string {
+  const trimmed = endpointPath.trim()
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed
+  }
+  if (target === 'local') {
+    return `http://127.0.0.1:8000${trimmed}`
+  }
+  return `${resolveBackendBaseUrl()}${trimmed}`
+}
+
 function trimTrailingSlash(value: string): string {
   return value.endsWith('/') ? value.slice(0, -1) : value
 }
@@ -230,13 +283,21 @@ function toPythonSingleQuotedString(value: string): string {
   return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
 }
 
-function buildPythonClientSnippet(endpointLiteral: string): string {
+function buildPythonClientSnippet(
+  endpointLiteral: string,
+  includeDeploymentId: boolean,
+  deploymentIdLiteral: string
+): string {
+  const deploymentLine = includeDeploymentId
+    ? `    'deployment_id': ${deploymentIdLiteral},`
+    : null
   return [
     '# pip install requests',
     'import requests',
     '',
     `endpoint = ${endpointLiteral}`,
     'payload = {',
+    ...(deploymentLine ? [deploymentLine] : []),
     "    'inputs': [[[0.0 for _ in range(28)] for _ in range(28)]],",
     "    'return_probabilities': True,",
     '}',

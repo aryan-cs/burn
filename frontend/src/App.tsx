@@ -86,6 +86,7 @@ interface DeploymentInferResponse {
 
 type DashboardTab = 'validate' | 'train' | 'infer' | 'deploy'
 type BuildStatus = 'idle' | 'success' | 'error'
+type DeployTarget = 'local' | 'modal'
 
 async function requestJson<T>(
   path: string,
@@ -160,9 +161,6 @@ function App() {
   const selectedCols = selectedNode?.type === 'Input'
     ? (selectedInputShape?.[2] ?? DEFAULT_INPUT_SHAPE[2])
     : toPositiveInt(selectedNode?.config.cols, DEFAULT_LAYER_COLS)
-  const selectedChannels = selectedNode?.type === 'Input'
-    ? (selectedInputShape?.[0] ?? DEFAULT_INPUT_SHAPE[0])
-    : DEFAULT_INPUT_SHAPE[0]
   const selectedUnits = selectedNode?.type === 'Dense'
     ? toPositiveInt(nodeUnits(selectedNode), DEFAULT_LAYER_ROWS * DEFAULT_LAYER_COLS)
     : DEFAULT_LAYER_ROWS * DEFAULT_LAYER_COLS
@@ -251,6 +249,7 @@ function App() {
   )
   const [inferenceTopPrediction, setInferenceTopPrediction] = useState<number | null>(null)
   const [deployment, setDeployment] = useState<DeploymentResponse | null>(null)
+  const [deployTarget, setDeployTarget] = useState<DeployTarget>('local')
   const [deployTopPrediction, setDeployTopPrediction] = useState<number | null>(null)
   const [deployOutput, setDeployOutput] = useState('No deployed inference output yet.')
   const isEditingName = Boolean(editingNodeId && editingNodeId === selectedNodeId)
@@ -512,9 +511,9 @@ function App() {
     if (!Number.isInteger(nextRows) || nextRows <= 0) return
 
     if (selectedNode.type === 'Input') {
-      const [channels, _height, width] = toInputShapeOrDefault(selectedNode.config.shape)
+      const [, _height, width] = toInputShapeOrDefault(selectedNode.config.shape)
       updateNodeConfig(selectedNodeId, {
-        shape: [channels, nextRows, width],
+        shape: [1, nextRows, width],
       })
       setHasValidatedModel(false)
       return
@@ -534,9 +533,9 @@ function App() {
     if (!Number.isInteger(nextCols) || nextCols <= 0) return
 
     if (selectedNode.type === 'Input') {
-      const [channels, height] = toInputShapeOrDefault(selectedNode.config.shape)
+      const [, height] = toInputShapeOrDefault(selectedNode.config.shape)
       updateNodeConfig(selectedNodeId, {
-        shape: [channels, height, nextCols],
+        shape: [1, height, nextCols],
       })
       setHasValidatedModel(false)
       return
@@ -554,15 +553,6 @@ function App() {
     if (!selectedNodeId || !selectedNode) return
     if (selectedNode.type !== 'Dense' && selectedNode.type !== 'Output') return
     updateNodeConfig(selectedNodeId, { activation: nextActivation })
-    setHasValidatedModel(false)
-  }
-
-  const handleChannelsChange = (nextValue: string) => {
-    if (!selectedNodeId || selectedNode?.type !== 'Input') return
-    const channels = Number(nextValue)
-    if (!Number.isInteger(channels) || channels <= 0) return
-    const [, height, width] = toInputShapeOrDefault(selectedNode.config.shape)
-    updateNodeConfig(selectedNodeId, { shape: [channels, height, width] })
     setHasValidatedModel(false)
   }
 
@@ -667,7 +657,8 @@ function App() {
         throw new Error('Add at least one layer before training.')
       }
 
-      const response = await requestJson<TrainResponse>('/api/model/train', {
+      const trainLocation = trainingConfig.location === 'local' ? 'local' : 'cloud'
+      const response = await requestJson<TrainResponse>(`/api/model/train?location=${trainLocation}`, {
         method: 'POST',
         body: JSON.stringify(payload),
       })
@@ -736,7 +727,7 @@ function App() {
         method: 'POST',
         body: JSON.stringify({
           job_id: trainingJobId,
-          target: 'local',
+          target: deployTarget,
           name: `${trainingConfig.dataset}-${trainingJobId.slice(0, 8)}`,
         }),
       })
@@ -879,7 +870,6 @@ function App() {
               selectedDisplayName={selectedDisplayName}
               selectedRows={selectedRows}
               selectedCols={selectedCols}
-              selectedChannels={selectedChannels}
               selectedUnits={selectedUnits}
               selectedDropoutRate={selectedDropoutRate}
               selectedOutputClasses={selectedOutputClasses}
@@ -892,7 +882,6 @@ function App() {
               canEditActivation={
                 selectedNode?.type === 'Dense' || selectedNode?.type === 'Output'
               }
-              canEditChannels={selectedNode?.type === 'Input'}
               canEditUnits={selectedNode?.type === 'Dense'}
               canEditDropoutRate={selectedNode?.type === 'Dropout'}
               canEditOutputClasses={selectedNode?.type === 'Output'}
@@ -911,7 +900,6 @@ function App() {
               onNameCancel={cancelNameEdit}
               onRowsChange={handleRowsChange}
               onColsChange={handleColsChange}
-              onChannelsChange={handleChannelsChange}
               onUnitsChange={handleUnitsChange}
               onDropoutRateChange={handleDropoutRateChange}
               onOutputClassesChange={handleOutputClassesChange}
@@ -931,6 +919,7 @@ function App() {
               trainingConfig={trainingConfig}
               isBackendBusy={isBackendBusy}
               onDatasetChange={(value) => setTrainingConfig({ dataset: value })}
+              onLocationChange={(value) => setTrainingConfig({ location: value })}
               onEpochsChange={(value) => setTrainingConfig({ epochs: value })}
               onBatchSizeChange={(value) => setTrainingConfig({ batchSize: value })}
               onOptimizerChange={(value) => setTrainingConfig({ optimizer: value })}
@@ -972,6 +961,8 @@ function App() {
               trainingJobId={trainingJobId}
               trainingStatus={trainingStatus}
               deployment={deployment}
+              deployTarget={deployTarget}
+              onDeployTargetChange={setDeployTarget}
               deployTopPrediction={deployTopPrediction}
               deployOutput={deployOutput}
               onDeployModel={handleDeployModel}
@@ -982,12 +973,20 @@ function App() {
                 isBackendBusy ||
                 !trainingJobId ||
                 trainingStatus !== 'complete' ||
-                deployment?.status === 'running'
+                (deployment?.status === 'running' &&
+                  deployment?.job_id === trainingJobId &&
+                  deployment?.target === deployTarget)
               }
               refreshDisabled={isBackendBusy || !deployment}
               stopDisabled={isBackendBusy || !deployment || deployment.status !== 'running'}
               inferDisabled={isBackendBusy || !deployment || deployment.status !== 'running'}
-              deployLabel={backendBusyAction === 'deploy' ? 'Deploying...' : 'Deploy Locally'}
+              deployLabel={
+                backendBusyAction === 'deploy'
+                  ? 'Deploying...'
+                  : deployTarget === 'modal'
+                    ? 'Deploy to Modal'
+                    : 'Deploy Locally'
+              }
               refreshLabel={backendBusyAction === 'deploy_status' ? 'Refreshing...' : 'Refresh'}
               stopLabel={backendBusyAction === 'deploy_stop' ? 'Stopping...' : 'Stop Deploy'}
               inferLabel={
@@ -1026,7 +1025,7 @@ function App() {
               width="16px"
               fill="#e3e3e3"
             >
-              <path d="M560-80 160-480l400-400 71 71-329 329 329 329-71 71Z" />
+              <path d="M400-80 0-480l400-400 71 71-329 329 329 329-71 71Z" />
             </svg>
           )}
         </button>
@@ -1209,9 +1208,14 @@ function getLayerSizeLabel(node: LayerNode): string {
   if (node.type === 'Input') {
     const shape = toShapeArray(node.config.shape)
     if (shape) {
+      if (shape.length >= 2) {
+        const rows = shape[shape.length - 2]
+        const cols = shape[shape.length - 1]
+        return `${rows} x ${cols}`
+      }
       return shape.join(' x ')
     }
-    return DEFAULT_INPUT_SHAPE.join(' x ')
+    return `${DEFAULT_INPUT_SHAPE[1]} x ${DEFAULT_INPUT_SHAPE[2]}`
   }
 
   if (node.type === 'Output') {

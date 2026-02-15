@@ -1329,6 +1329,18 @@ button {
   color: rgba(255, 255, 255, 0.56);
 }
 
+.deploy-target-toggle {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.deploy-target-active {
+  border-color: var(--main-color-border);
+  background: var(--main-color-soft);
+  color: var(--main-color-strong);
+}
+
 .deploy-endpoint-value {
   display: block;
   margin-top: 6px;

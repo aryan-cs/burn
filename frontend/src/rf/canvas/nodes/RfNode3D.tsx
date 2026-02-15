@@ -7,10 +7,10 @@ import { useRFGraphStore } from '../../store/rfGraphStore'
 import type { RFNode, RFNodeType } from '../../types'
 
 const NODE_COLORS: Record<RFNodeType, string> = {
-  RFInput: '#4f9ed9',
-  RFFlatten: '#59b9a6',
-  RandomForestClassifier: '#77d46f',
-  RFOutput: '#d56c78',
+  RFInput: '#ff8c2b',
+  RFFlatten: '#f0f0f0',
+  RandomForestClassifier: '#ffb429',
+  RFOutput: '#4da3ff',
 }
 
 const NODE_SIZES: Record<RFNodeType, [number, number, number]> = {
@@ -55,11 +55,11 @@ export function RfNode3D({ node }: { node: RFNode }) {
         <mesh onClick={handleClick} onPointerOver={() => setHovered(true)} onPointerOut={() => setHovered(false)}>
           <boxGeometry args={size} />
           <meshStandardMaterial
-            color={color}
+            color="#272727"
             transparent
-            opacity={0.86}
+            opacity={0.95}
             emissive={isSelected ? color : hovered ? color : '#000000'}
-            emissiveIntensity={isSelected ? 0.36 : hovered ? 0.18 : 0}
+            emissiveIntensity={isSelected ? 0.32 : hovered ? 0.16 : 0}
           />
         </mesh>
         {isSelected && (
@@ -69,10 +69,10 @@ export function RfNode3D({ node }: { node: RFNode }) {
           </mesh>
         )}
 
-        <Text position={[0, size[1] / 2 + 0.3, 0]} fontSize={0.22} color="#e7f7ff" anchorX="center" anchorY="bottom">
+        <Text position={[0, size[1] / 2 + 0.3, 0]} fontSize={0.22} color="#f5f5f5" anchorX="center" anchorY="bottom">
           {node.type}
         </Text>
-        <Text position={[0, -size[1] / 2 - 0.22, 0]} fontSize={0.14} color="#b4d3ec" anchorX="center" anchorY="top">
+        <Text position={[0, -size[1] / 2 - 0.22, 0]} fontSize={0.14} color="#c9c9c9" anchorX="center" anchorY="top">
           {getSummary(node)}
         </Text>
 

@@ -1,12 +1,12 @@
 import './modelHub.css'
 
-let NN = "Neural Network"
-let RF = "Random Forest"
-let VLM = "Vision-Language"
-let SVM = "SVM"
-let PCA = "PCA"
-let LINREG = "Linear Regression"
-let LOGREG = "Logistic Regression"
+const NN = 'Neural Network'
+const RF = 'Random Forest'
+const VLM = 'Vision-Language'
+const SVM = 'SVM'
+const PCA = 'PCA'
+const LINREG = 'Linear Regression'
+const LOGREG = 'Logistic Regression'
 
 type LaunchCard = {
   title: string
@@ -35,10 +35,10 @@ const SCRATCH_CARDS: LaunchCard[] = [
     tone: 'rf',
   },
   {
-    title: 'Vision-Language Model Builder',
+    title: 'VLM Object Detection Lab',
     subtitle: 'Start From Scratch',
-    description: 'Coming soon!',
-    href: '#',
+    description: 'Camera-based object detection workspace with Hugging Face model runtime.',
+    href: '/vlm?mode=scratch',
     badge: VLM,
     tone: 'vlm',
   },
@@ -61,8 +61,8 @@ const SCRATCH_CARDS: LaunchCard[] = [
   {
     title: 'Linear Regression Builder',
     subtitle: 'Start From Scratch',
-    description: 'Coming soon!',
-    href: '#',
+    description: 'Build and train a real linear regression model with live fit visualization.',
+    href: '/linreg?mode=scratch',
     badge: LINREG,
     tone: 'linreg',
   },
@@ -80,7 +80,7 @@ const PRESET_CARDS: LaunchCard[] = [
   {
     title: 'MNIST Baseline MLP',
     subtitle: 'Preset Project',
-    description: 'Input → Flatten → Dense → Output. Good default for first compile/train.',
+    description: 'Input -> Flatten -> Dense -> Output. Good default for first compile/train.',
     href: '/nn?mode=preset&template=mnist_basic',
     badge: NN,
     tone: 'nn',
@@ -125,10 +125,36 @@ const PRESET_CARDS: LaunchCard[] = [
     badge: RF,
     tone: 'rf',
   },
+  {
+    title: 'Object Detection Camera Demo',
+    subtitle: 'Preset Project',
+    description: 'YOLOS-Tiny object detection starter with webcam testing flow.',
+    href: '/vlm?mode=preset&template=object_detection_demo',
+    badge: VLM,
+    tone: 'vlm',
+  },
+  {
+    title: 'Study Hours Regressor',
+    subtitle: 'Preset Project',
+    description: 'Predict exam score from study hours with a beginner-friendly linear regression workflow.',
+    href: '/linreg?mode=preset&template=study_hours_baseline',
+    badge: LINREG,
+    tone: 'linreg',
+  },
+  {
+    title: 'Diabetes BMI Regressor',
+    subtitle: 'Preset Project',
+    description: 'Real sklearn diabetes subset: predict one-year disease progression from BMI.',
+    href: '/linreg?mode=preset&template=diabetes_bmi_baseline',
+    badge: LINREG,
+    tone: 'linreg',
+  },
 ]
 
 const NN_PRESET_CARDS = PRESET_CARDS.filter((card) => card.tone === 'nn')
 const RF_PRESET_CARDS = PRESET_CARDS.filter((card) => card.tone === 'rf')
+const VLM_PRESET_CARDS = PRESET_CARDS.filter((card) => card.tone === 'vlm')
+const LINREG_PRESET_CARDS = PRESET_CARDS.filter((card) => card.tone === 'linreg')
 
 function LaunchCardView({ card }: { card: LaunchCard }) {
   return (
@@ -156,13 +182,14 @@ export default function ModelHubPage() {
           Whether you're a student building their first classifier or a business designing an end-to-end demand forecasting engine, Burn is there to help.
         </p>
         <p className="hub-subtitle">
-          Want to share your work with the world? Check out the {' '}
-          <a
-            href="/deployments"
-            className="hub-inline-link"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
+          New: the Digits NN preset uses the built-in sklearn dataset and works without Kaggle setup.
+        </p>
+        <p className="hub-subtitle">
+          VLM projects use Hugging Face object-detection models (default: YOLOS-Tiny) and include a camera testing interface.
+        </p>
+        <p className="hub-subtitle">
+          Need to manage live model endpoints later? Open{' '}
+          <a href="/deployments" className="hub-inline-link">
             Deployment Manager
           </a>
           .
@@ -207,6 +234,30 @@ export default function ModelHubPage() {
               </header>
               <div className="hub-grid hub-grid-family">
                 {RF_PRESET_CARDS.map((card) => (
+                  <LaunchCardView key={card.title} card={card} />
+                ))}
+              </div>
+            </article>
+
+            <article className="hub-family-panel hub-family-panel-vlm">
+              <header className="hub-family-head">
+                <div className="hub-family-label">Vision-Language Models</div>
+                <div className="hub-family-meta">Hugging Face · Camera Object Detection</div>
+              </header>
+              <div className="hub-grid hub-grid-family">
+                {VLM_PRESET_CARDS.map((card) => (
+                  <LaunchCardView key={card.title} card={card} />
+                ))}
+              </div>
+            </article>
+
+            <article className="hub-family-panel hub-family-panel-linreg">
+              <header className="hub-family-head">
+                <div className="hub-family-label">Linear Regression</div>
+                <div className="hub-family-meta">Gradient Descent · Fit Visualization</div>
+              </header>
+              <div className="hub-grid hub-grid-family">
+                {LINREG_PRESET_CARDS.map((card) => (
                   <LaunchCardView key={card.title} card={card} />
                 ))}
               </div>

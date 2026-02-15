@@ -7,6 +7,7 @@ interface DeploymentInfo {
   status: string
   target: string
   endpoint_path: string
+  model_family?: string
   created_at: string
   last_used_at?: string | null
   request_count: number
@@ -22,6 +23,10 @@ interface DeploymentLog {
 }
 
 interface DeploymentInferResponse {
+  deployment_id?: string
+  job_id?: string
+  input_shape?: number[]
+  output_shape?: number[]
   predictions?: number[]
   probabilities?: number[][]
   logits?: number[][]
@@ -67,7 +72,7 @@ export default function DeploymentsPage() {
   const [message, setMessage] = useState('Loading deployments...')
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [isLoadingSelected, setIsLoadingSelected] = useState(false)
-  const [inferResult, setInferResult] = useState('No endpoint inference run yet.')
+  const [inferResult, setInferResult] = useState<DeploymentInferResponse | null>(null)
 
   const activeCount = useMemo(
     () => deployments.filter((deployment) => deployment.status === 'running').length,
@@ -100,7 +105,7 @@ export default function DeploymentsPage() {
       setSelected(null)
       setLogs([])
       if (!silent) {
-        setMessage('No deployments found. Train a model and deploy it from the NN Deploy tab.')
+        setMessage('No deployments found. Train and deploy a model from any builder tab.')
       }
       return
     }
@@ -198,7 +203,10 @@ export default function DeploymentsPage() {
 
   const inferSelected = () =>
     runAction('infer', async () => {
-      if (!selectedId) throw new Error('Select a deployment first.')
+      if (!selectedId || !selectedFromList) throw new Error('Select a deployment first.')
+      if (!isNnDeployment(selectedFromList)) {
+        throw new Error('Manager inference button currently supports NN deployments only.')
+      }
       const response = await requestJson<DeploymentInferResponse>(`/api/deploy/${selectedId}/infer`, {
         method: 'POST',
         body: JSON.stringify({
@@ -206,7 +214,7 @@ export default function DeploymentsPage() {
           return_probabilities: true,
         }),
       })
-      setInferResult(JSON.stringify(response, null, 2))
+      setInferResult(response)
       await fetchSelected(selectedId)
       setMessage('Endpoint inference request completed.')
     })
@@ -267,7 +275,7 @@ export default function DeploymentsPage() {
                     </span>
                   </div>
                   <div className="deployments-item-sub">
-                    id: {deployment.deployment_id.slice(0, 10)} · job: {deployment.job_id.slice(0, 10)} · req: {deployment.request_count}
+                    id: {deployment.deployment_id.slice(0, 10)} · {getModelFamilyLabel(deployment.model_family)} · job: {deployment.job_id.slice(0, 10)} · req: {deployment.request_count}
                   </div>
                 </button>
               ))
@@ -304,10 +312,23 @@ export default function DeploymentsPage() {
                   <button
                     type="button"
                     onClick={inferSelected}
-                    disabled={busyAction !== null || !selectedFromList || selectedFromList.status !== 'running'}
+                    disabled={
+                      busyAction !== null ||
+                      !selectedFromList ||
+                      selectedFromList.status !== 'running' ||
+                      !isNnDeployment(selectedFromList)
+                    }
                     className="deployments-btn deployments-icon-btn"
                     aria-label={busyAction === 'infer' ? 'Inferencing...' : 'Run Test Inference'}
-                    title={busyAction === 'infer' ? 'Inferencing...' : 'Run Test Inference'}
+                    title={
+                      !selectedFromList
+                        ? 'Run Test Inference'
+                        : !isNnDeployment(selectedFromList)
+                          ? 'Inference button is currently available for NN deployments only'
+                          : busyAction === 'infer'
+                            ? 'Inferencing...'
+                            : 'Run Test Inference'
+                    }
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#e3e3e3"><path d="M200-120q-51 0-72.5-45.5T138-250l222-270v-240h-40q-17 0-28.5-11.5T280-800q0-17 11.5-28.5T320-840h320q17 0 28.5 11.5T680-800q0 17-11.5 28.5T640-760h-40v240l222 270q32 39 10.5 84.5T760-120H200Zm0-80h560L520-492v-268h-80v268L200-200Zm280-280Z"/></svg>
                   </button>
@@ -333,7 +354,8 @@ export default function DeploymentsPage() {
                     <div><span>Deployment ID</span><code>{selected.deployment_id}</code></div>
                     <div><span>Job ID</span><code>{selected.job_id}</code></div>
                     <div><span>Status</span><code>{selected.status}</code></div>
-                    <div><span>Target</span><code>{selected.target}</code></div>
+                    <div><span>Target</span><code>{formatDeploymentTarget(selected.target)}</code></div>
+                    <div><span>Model Family</span><code>{getModelFamilyLabel(selected.model_family)}</code></div>
                     <div><span>Endpoint</span><code>{selected.endpoint_path}</code></div>
                     <div><span>Requests</span><code>{selected.request_count}</code></div>
                     <div><span>Created</span><code>{formatDateTime(selected.created_at)}</code></div>
@@ -361,7 +383,13 @@ export default function DeploymentsPage() {
 
                   <div className="deployments-block">
                     <h3>Last Inference Result</h3>
-                    <pre className="deployments-infer">{inferResult}</pre>
+                    <div className="deployments-infer">
+                      {inferResult ? (
+                        <FormattedInferenceResult result={inferResult} />
+                      ) : (
+                        <p className="deployments-empty">No endpoint inference run yet.</p>
+                      )}
+                    </div>
                   </div>
                 </>
               ) : (
@@ -394,9 +422,105 @@ function getDeploymentDisplayName(deployment: DeploymentInfo | null): string {
   if (deployment.name && deployment.name.trim().length > 0) {
     return deployment.name.trim()
   }
+  if ((deployment.model_family ?? '').toLowerCase() === 'linreg') {
+    return `Local Linear Regression Endpoint (${deployment.job_id.slice(0, 8)})`
+  }
   return `Local NN Endpoint (${deployment.job_id.slice(0, 8)})`
+}
+
+function getModelFamilyLabel(modelFamily: string | undefined): string {
+  const normalized = (modelFamily ?? 'nn').toLowerCase()
+  if (normalized === 'linreg') return 'Linear Regression'
+  if (normalized === 'nn') return 'Neural Network'
+  return normalized.toUpperCase()
+}
+
+function formatDeploymentTarget(target: string | undefined): string {
+  const normalized = (target ?? '').trim().toLowerCase()
+  if (normalized === 'cloud') return 'modal'
+  return normalized || 'local'
+}
+
+function isNnDeployment(deployment: DeploymentInfo): boolean {
+  return (deployment.model_family ?? 'nn').toLowerCase() === 'nn'
 }
 
 function createZeroMnistSample(): number[][] {
   return Array.from({ length: 28 }, () => Array.from({ length: 28 }, () => 0))
+}
+
+function FormattedInferenceResult({ result }: { result: DeploymentInferResponse }) {
+  const predictionCount = result.predictions?.length ?? 0
+  const topPrediction = predictionCount > 0 ? result.predictions?.[0] : null
+  const firstProbabilities = result.probabilities?.[0] ?? []
+  const topConfidence =
+    firstProbabilities.length > 0 ? Math.max(...firstProbabilities) : null
+
+  const probabilityRows = firstProbabilities
+    .map((value, index) => ({ index, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 10)
+
+  return (
+    <div className="deployments-infer-content">
+      <div className="deployments-infer-summary">
+        <div>
+          <span>Top Prediction</span>
+          <strong>{topPrediction !== null && topPrediction !== undefined ? topPrediction : 'N/A'}</strong>
+        </div>
+        <div>
+          <span>Top Confidence</span>
+          <strong>{topConfidence !== null ? `${(topConfidence * 100).toFixed(2)}%` : 'N/A'}</strong>
+        </div>
+        <div>
+          <span>Predictions</span>
+          <strong>{predictionCount}</strong>
+        </div>
+        <div>
+          <span>Input Shape</span>
+          <strong>{formatShape(result.input_shape)}</strong>
+        </div>
+        <div>
+          <span>Output Shape</span>
+          <strong>{formatShape(result.output_shape)}</strong>
+        </div>
+      </div>
+
+      {result.predictions && result.predictions.length > 0 ? (
+        <div className="deployments-infer-pills">
+          {result.predictions.map((prediction, index) => (
+            <span key={`prediction-${index}`} className="deployments-infer-pill">
+              sample {index + 1}: {prediction}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {probabilityRows.length > 0 ? (
+        <div className="deployments-probability-list">
+          {probabilityRows.map((row) => (
+            <div key={`prob-${row.index}`} className="deployments-probability-row">
+              <span className="deployments-probability-label">Class {row.index}</span>
+              <div className="deployments-probability-track">
+                <div
+                  className="deployments-probability-fill"
+                  style={{ width: `${(row.value * 100).toFixed(2)}%` }}
+                />
+              </div>
+              <span className="deployments-probability-value">{(row.value * 100).toFixed(2)}%</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function formatShape(shape: number[] | undefined): string {
+  if (!shape || shape.length === 0) return 'N/A'
+  const compact = [...shape]
+  while (compact.length > 2 && compact[0] === 1) {
+    compact.shift()
+  }
+  return compact.join(' × ')
 }

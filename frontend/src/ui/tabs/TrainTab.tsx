@@ -8,6 +8,7 @@ const TEST_LOSS_COLOR = '#ffe8be'
 
 interface TrainingConfigView {
   dataset: string
+  location: 'local' | 'cloud'
   epochs: number
   batchSize: number
   optimizer: string
@@ -19,6 +20,7 @@ interface TrainTabProps {
   trainingConfig: TrainingConfigView
   isBackendBusy: boolean
   onDatasetChange: (value: string) => void
+  onLocationChange: (value: 'local' | 'cloud') => void
   onEpochsChange: (value: number) => void
   onBatchSizeChange: (value: number) => void
   onOptimizerChange: (value: string) => void
@@ -46,6 +48,7 @@ export function TrainTab({
   trainingConfig,
   isBackendBusy,
   onDatasetChange,
+  onLocationChange,
   onEpochsChange,
   onBatchSizeChange,
   onOptimizerChange,
@@ -98,6 +101,19 @@ export function TrainTab({
             >
               <option value="mnist">MNIST</option>
               <option value="digits">Digits (8x8)</option>
+            </select>
+          </label>
+
+          <label className="config-row">
+            <span className="config-label">Location</span>
+            <select
+              value={trainingConfig.location}
+              disabled={isBackendBusy}
+              onChange={(e) => onLocationChange(e.target.value as 'local' | 'cloud')}
+              className="config-control"
+            >
+              <option value="local">Local</option>
+              <option value="cloud">Modal</option>
             </select>
           </label>
 

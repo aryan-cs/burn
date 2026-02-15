@@ -6,26 +6,33 @@ interface WeightVisualProps {
   curve: THREE.Curve<THREE.Vector3>
   speed: number
   color: string
+  size?: number
 }
 
 /**
  * Animated particle that travels along an edge during training
  * to visualize gradient flow.
  */
-export function WeightVisual({ curve, speed, color }: WeightVisualProps) {
+export function WeightVisual({ curve, speed, color, size = 0.045 }: WeightVisualProps) {
   const meshRef = useRef<THREE.Mesh>(null)
   const tRef = useRef(0)
 
   useFrame((_, delta) => {
     if (!meshRef.current) return
-    tRef.current = (tRef.current + delta * speed) % 1
+    tRef.current += delta * speed
+    while (tRef.current > 1) {
+      tRef.current -= 1
+    }
+    while (tRef.current < 0) {
+      tRef.current += 1
+    }
     const point = curve.getPoint(tRef.current)
     meshRef.current.position.copy(point)
   })
 
   return (
     <mesh ref={meshRef}>
-      <sphereGeometry args={[0.06, 8, 8]} />
+      <sphereGeometry args={[size, 10, 10]} />
       <meshBasicMaterial color={color} />
     </mesh>
   )

@@ -20,7 +20,7 @@ export function RfConnection({ edge, sourcePos, targetPos }: RfConnectionProps) 
 
   return (
     <mesh geometry={geometry}>
-      <meshStandardMaterial color="#5ec1ff" emissive="#2d87c2" emissiveIntensity={0.45} transparent opacity={0.8} />
+      <meshStandardMaterial color="#d9d9d9" emissive="#8a8a8a" emissiveIntensity={0.35} transparent opacity={0.6} />
     </mesh>
   )
 }

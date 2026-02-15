@@ -1,8 +1,13 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useTrainingStore } from '../store/trainingStore'
 
+const WS_RETRY_BASE_DELAY_MS = 400
+const WS_RETRY_MAX_DELAY_MS = 2500
+const WS_MAX_RETRIES = 20
+
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null)
+  const reconnectTimerRef = useRef<number | null>(null)
   const jobId = useTrainingStore((s) => s.jobId)
   const status = useTrainingStore((s) => s.status)
   const addMetric = useTrainingStore((s) => s.addMetric)
@@ -13,52 +18,97 @@ export function useWebSocket() {
   useEffect(() => {
     if (status !== 'training' || !jobId) return
 
-    const ws = new WebSocket(buildTrainingWsUrl(jobId))
-    wsRef.current = ws
+    let disposed = false
+    let retries = 0
 
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data)
-
-      switch (data.type) {
-        case 'epoch_update':
-          addMetric({
-            epoch: data.epoch,
-            loss: data.loss,
-            accuracy: data.accuracy,
-            trainLoss: data.train_loss,
-            trainAccuracy: data.train_accuracy,
-            testLoss: data.test_loss,
-            testAccuracy: data.test_accuracy,
-          })
-          if (data.weights) {
-            updateWeights(data.weights)
-          }
-          break
-        case 'training_done':
-          setStatus('complete')
-          break
-        case 'error':
-          setError(data.message)
-          break
+    const clearReconnectTimer = () => {
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
       }
     }
 
-    ws.onerror = () => {
-      setError('WebSocket connection failed')
+    const scheduleReconnect = () => {
+      if (disposed) return
+      const store = useTrainingStore.getState()
+      if (store.status !== 'training' || store.jobId !== jobId) return
+      if (retries >= WS_MAX_RETRIES) {
+        setError('WebSocket connection failed')
+        return
+      }
+      const delay = Math.min(
+        WS_RETRY_BASE_DELAY_MS * Math.max(1, retries + 1),
+        WS_RETRY_MAX_DELAY_MS
+      )
+      retries += 1
+      clearReconnectTimer()
+      reconnectTimerRef.current = window.setTimeout(connect, delay)
     }
 
-    ws.onclose = () => {
-      wsRef.current = null
+    const connect = () => {
+      if (disposed) return
+      const ws = new WebSocket(buildTrainingWsUrl(jobId))
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        retries = 0
+      }
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data)
+
+        switch (data.type) {
+          case 'ws_connected':
+          case 'training_backend':
+            // Informational events; no state update required.
+            break
+          case 'epoch_update':
+            addMetric({
+              epoch: data.epoch,
+              loss: data.loss,
+              accuracy: data.accuracy,
+              trainLoss: data.train_loss,
+              trainAccuracy: data.train_accuracy,
+              testLoss: data.test_loss,
+              testAccuracy: data.test_accuracy,
+            })
+            if (data.weights) {
+              updateWeights(data.weights)
+            }
+            break
+          case 'training_done':
+            setStatus('complete')
+            break
+          case 'error':
+            setError(data.message)
+            break
+        }
+      }
+
+      ws.onerror = () => {
+        // Let onclose handle retry policy to avoid failing fast on transient disconnects.
+      }
+
+      ws.onclose = () => {
+        wsRef.current = null
+        scheduleReconnect()
+      }
     }
+
+    connect()
 
     return () => {
-      ws.close()
+      disposed = true
+      clearReconnectTimer()
+      wsRef.current?.close()
       wsRef.current = null
     }
   }, [status, jobId, addMetric, updateWeights, setStatus, setError])
 
   const sendStop = useCallback(() => {
-    wsRef.current?.send(JSON.stringify({ command: 'stop' }))
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ command: 'stop' }))
+    }
   }, [])
 
   return { sendStop }

@@ -18,41 +18,55 @@ interface BuildTabProps {
   isEditingName: boolean
   draftName: string
   selectedDisplayName: string
+
   selectedRows: number
   selectedCols: number
+
+  // Extra editable fields
   selectedChannels: number
   selectedUnits: number
   selectedDropoutRate: number
   selectedOutputClasses: number
+
   selectedActivation: string
   selectedShapeLabel: string
+
   canEditSize: boolean
   sizeFieldLabel: string
+
   canEditActivation: boolean
   canEditChannels: boolean
   canEditUnits: boolean
   canEditDropoutRate: boolean
   canEditOutputClasses: boolean
+
   activationOptions: string[]
+
   layerCount: number
   neuronCount: number
   weightCount: number
   biasCount: number
   layerTypeSummary: string
   sharedNonOutputActivation: string
+
   onAddLayer: () => void
   onSelectLayer: (nodeId: string) => void
+
   onBeginNameEdit: () => void
   onDraftNameChange: (value: string) => void
   onNameCommit: () => void
   onNameCancel: () => void
+
   onRowsChange: (value: string) => void
   onColsChange: (value: string) => void
+
   onChannelsChange: (value: string) => void
   onUnitsChange: (value: string) => void
   onDropoutRateChange: (value: string) => void
   onOutputClassesChange: (value: string) => void
+
   onActivationChange: (value: string) => void
+
   onValidate: () => void
   buildStatus: 'idle' | 'success' | 'error'
   buildStatusMessage: string
@@ -230,11 +244,7 @@ export function BuildTab({
                 <>
                   <label htmlFor="layer-activation" className="field-label">
                     Activation
-                    <InfoTooltip
-                      title="Activation"
-                      text={FIELD_TOOLTIPS.Activation}
-                      position="top"
-                    />
+                    <InfoTooltip title="Activation" text={FIELD_TOOLTIPS.Activation} position="top" />
                   </label>
 
                   <select
@@ -325,7 +335,11 @@ export function BuildTab({
           <MetricTile label="Neurons" value={String(neuronCount)} tooltip={FIELD_TOOLTIPS.Neurons} />
           <MetricTile label="Weights" value={String(weightCount)} tooltip={FIELD_TOOLTIPS.Weights} />
           <MetricTile label="Biases" value={String(biasCount)} tooltip={FIELD_TOOLTIPS.Biases} />
-          <MetricTile label="Layer Type" value={layerTypeSummary} tooltip={FIELD_TOOLTIPS['Layer Type']} />
+          <MetricTile
+            label="Layer Type"
+            value={layerTypeSummary}
+            tooltip={FIELD_TOOLTIPS['Layer Type']}
+          />
           <MetricTile
             label="Shared Activation Function"
             value={formatActivationLabel(sharedNonOutputActivation)}
@@ -389,4 +403,3 @@ function formatActivationLabel(value: string): string {
     })
     .join(' ')
 }
-

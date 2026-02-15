@@ -10,6 +10,7 @@
   background:
     radial-gradient(circle at 12% -8%, rgba(255, 180, 41, 0.22), transparent 34%),
     radial-gradient(circle at 88% -12%, rgba(131, 194, 255, 0.12), transparent 32%),
+    radial-gradient(circle at 66% 8%, rgba(114, 248, 220, 0.1), transparent 40%),
     #0a0a0f;
 }
 
@@ -173,6 +174,14 @@
   box-shadow: inset 0 0 0 1px rgba(110, 200, 255, 0.14);
 }
 
+.hub-family-panel-vlm {
+  box-shadow: inset 0 0 0 1px rgba(114, 248, 220, 0.16);
+}
+
+.hub-family-panel-linreg {
+  box-shadow: inset 0 0 0 1px rgba(255, 180, 41, 0.2);
+}
+
 .hub-family-head {
   display: flex;
   align-items: baseline;
@@ -266,7 +275,7 @@
 }
 
 .hub-card-vlm {
-  box-shadow: inset 0 0 0 1px rgba(186, 120, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(114, 248, 220, 0.12);
 }
 
 .hub-card-svm {
@@ -331,9 +340,9 @@
 }
 
 .hub-badge-vlm {
-  color: #f0d8ff;
-  border-color: rgba(186, 120, 255, 0.5);
-  background: rgba(186, 120, 255, 0.16);
+  color: #dffff6;
+  border-color: rgba(114, 248, 220, 0.52);
+  background: rgba(114, 248, 220, 0.16);
 }
 
 .hub-badge-svm {
@@ -427,7 +436,23 @@
   border-color: rgba(110, 200, 255, 0.44);
 }
 
+.hub-launch-btn-vlm {
+  color: #d9fff6;
+  background: rgba(114, 248, 220, 0.14);
+  border-color: rgba(114, 248, 220, 0.44);
+}
+
 @media (max-width: 1160px) {
+  .hub-grid-scratch {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hub-family-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 980px) {
   .hub-family-grid {
     grid-template-columns: 1fr;
   }

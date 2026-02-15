@@ -295,7 +295,11 @@ function computeAnimatedDisplayCount(
   return Math.min(targetDisplayCount, startDisplayCount + gained)
 }
 
-export function RfSceneManager() {
+interface RfSceneManagerProps {
+  lowDetailMode: boolean
+}
+
+export function RfSceneManager({ lowDetailMode }: RfSceneManagerProps) {
   const nodes = useRFGraphStore((state) => state.nodes)
   const training = useRFGraphStore((state) => state.training)
   const visualization = useRFGraphStore((state) => state.visualization)
@@ -308,8 +312,12 @@ export function RfSceneManager() {
 
   const totalTrees = toPositiveInt(classifier?.config.n_estimators, 100)
   const maxVisibleTrees = clamp(toPositiveInt(visualization.visibleTrees, 18), 3, 48)
-  const displayTreeCount = Math.min(maxVisibleTrees, Math.max(3, totalTrees))
-  const treeDepth = clamp(toPositiveInt(visualization.treeDepth, 4), 2, 6)
+  const requestedTreeCount = Math.min(maxVisibleTrees, Math.max(3, totalTrees))
+  const displayTreeCount = lowDetailMode
+    ? Math.min(requestedTreeCount, 10)
+    : requestedTreeCount
+  const requestedTreeDepth = clamp(toPositiveInt(visualization.treeDepth, 4), 2, 6)
+  const treeDepth = lowDetailMode ? Math.min(requestedTreeDepth, 4) : requestedTreeDepth
   const treeSpread = clamp(Number(visualization.treeSpread) || 1, 0.6, 2.2)
   const nodeScale = clamp(Number(visualization.nodeScale) || 1, 0.6, 1.8)
   const classCount = Math.max(2, toPositiveInt(outputNode?.config.num_classes, 3))
@@ -431,7 +439,7 @@ export function RfSceneManager() {
       />
 
       <mesh position={[sourcePosition.x, sourcePosition.y, sourcePosition.z]}>
-        <sphereGeometry args={[0.11 * nodeScale, 16, 16]} />
+        <sphereGeometry args={[0.11 * nodeScale, lowDetailMode ? 10 : 16, lowDetailMode ? 10 : 16]} />
         <meshStandardMaterial
           color="#1f1f1f"
           emissive={ROOT_CHECK_COLOR}
@@ -500,7 +508,7 @@ export function RfSceneManager() {
                   key={`rf-tree-${treeIndex}-node-${nodeIndex}`}
                   position={[node.position.x, node.position.y, node.position.z]}
                 >
-                  <sphereGeometry args={[radius, 12, 12]} />
+                  <sphereGeometry args={[radius, lowDetailMode ? 8 : 12, lowDetailMode ? 8 : 12]} />
                   <meshStandardMaterial
                     color="#1f1f1f"
                     emissive={color}

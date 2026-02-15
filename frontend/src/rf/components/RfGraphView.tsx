@@ -1,9 +1,13 @@
 import { RfViewport } from '../canvas/RfViewport'
 
-export function RfGraphView() {
+interface RfGraphViewProps {
+  lowDetailMode: boolean
+}
+
+export function RfGraphView({ lowDetailMode }: RfGraphViewProps) {
   return (
     <section className="rf-builder-surface">
-      <RfViewport />
+      <RfViewport lowDetailMode={lowDetailMode} />
     </section>
   )
 }

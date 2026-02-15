@@ -8,6 +8,12 @@ interface LossSurfaceGraphProps {
   landscape: LossLandscapeData | null
   currentEpoch: number
   totalEpochs: number
+  topology?: {
+    layerCount: number
+    neuronCount: number
+    weightCount: number
+    biasCount: number
+  }
 }
 
 const FIXED_POLAR_ANGLE = 1.02

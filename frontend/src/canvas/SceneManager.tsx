@@ -9,7 +9,7 @@ import {
   STAGGER_STEP_MS,
   computeStaggerProgress,
 } from './animation/trainingPulse'
-import { useGraphStore, type Edge, type LayerNode } from '../store/graphStore'
+import { useGraphStore, type LayerNode } from '../store/graphStore'
 import { useTrainingStore, type WeightSnapshot } from '../store/trainingStore'
 import { getLayerRolesForColoring, getNeuralNetworkOrder } from '../utils/graphOrder'
 import { Connection } from './edges/Connection'
@@ -46,14 +46,40 @@ export function SceneManager({ lowDetailMode }: SceneManagerProps) {
     })
     return value
   }, [orderedNodeIds])
-  const nodeValueByNodeId = useMemo(
+  const currentNodeValueByNodeId = useMemo(
     () => buildNodeTrainingValues(nodes, orderedNodeIds, latestWeights),
     [latestWeights, nodes, orderedNodeIds]
   )
-  const edgeValueByEdgeId = useMemo(
-    () => buildEdgeTrainingValues(edges, nodeValueByNodeId),
-    [edges, nodeValueByNodeId]
-  )
+  const randomEdgeCenterByIdRef = useRef<Map<string, number>>(new Map())
+  const randomEdgeValueByIdRef = useRef<Map<string, number>>(new Map())
+  const previousWavePhaseRef = useRef<TrainingFlowPhase | null>(null)
+
+  useEffect(() => {
+    const activeEdgeIds = new Set(Object.keys(edges))
+    const centers = randomEdgeCenterByIdRef.current
+    const values = randomEdgeValueByIdRef.current
+
+    Array.from(centers.keys()).forEach((edgeId) => {
+      if (!activeEdgeIds.has(edgeId)) {
+        centers.delete(edgeId)
+      }
+    })
+    Array.from(values.keys()).forEach((edgeId) => {
+      if (!activeEdgeIds.has(edgeId)) {
+        values.delete(edgeId)
+      }
+    })
+
+    Object.keys(edges).forEach((edgeId) => {
+      if (!centers.has(edgeId)) {
+        centers.set(edgeId, randomSigned())
+      }
+      if (!values.has(edgeId)) {
+        values.set(edgeId, randomSigned() * 0.16)
+      }
+    })
+  }, [edges])
+
   const epochWaveStartMsRef = useRef<number | null>(null)
   const prevEpochRef = useRef(0)
   const [waveNowMs, setWaveNowMs] = useState(() => performance.now())
@@ -101,6 +127,29 @@ export function SceneManager({ lowDetailMode }: SceneManagerProps) {
     return computeTrainingWaveState(elapsedMs, orderedNodeIds.length)
   }, [orderedNodeIds.length, trainingStatus, waveNowMs])
 
+  useEffect(() => {
+    const previousPhase = previousWavePhaseRef.current
+    previousWavePhaseRef.current = waveState.phase
+
+    if (trainingStatus !== 'training') {
+      return
+    }
+    if (waveState.phase === null || waveState.phase === previousPhase) return
+
+    const centers = randomEdgeCenterByIdRef.current
+    const values = randomEdgeValueByIdRef.current
+    Object.keys(edges).forEach((edgeId) => {
+      const center = centers.get(edgeId) ?? randomSigned()
+      if (!centers.has(edgeId)) {
+        centers.set(edgeId, center)
+      }
+      const current = values.get(edgeId) ?? 0
+      const sample = sampleNormal(center, 0.34)
+      const nextValue = clampSigned(current + sample * 0.2)
+      values.set(edgeId, nextValue)
+    })
+  }, [edges, trainingStatus, waveState.phase])
+
   const trainingPulseByNodeId = useMemo(() => {
     const pulses = new Map<
       string,
@@ -113,19 +162,19 @@ export function SceneManager({ lowDetailMode }: SceneManagerProps) {
       pulses.set(nodeId, {
         active: intensity > 0,
         intensity,
-        value: nodeValueByNodeId.get(nodeId) ?? 0,
+        value: currentNodeValueByNodeId.get(nodeId) ?? 0,
         phase: waveState.phase,
       })
     })
     return pulses
-  }, [nodeValueByNodeId, orderedNodeIds, trainingStatus, waveState])
+  }, [currentNodeValueByNodeId, orderedNodeIds, trainingStatus, waveState])
 
   const trainingFlowByEdgeId = useMemo(() => {
     const flows = new Map<
       string,
       { active: boolean; intensity: number; value: number; phase: TrainingFlowPhase | null }
     >()
-    if (trainingStatus !== 'training') return flows
+    const isTraining = trainingStatus === 'training'
 
     Object.values(edges).forEach((edge) => {
       const sourceIndex = orderIndex.get(edge.source)
@@ -136,20 +185,25 @@ export function SceneManager({ lowDetailMode }: SceneManagerProps) {
       const sourceIntensity = waveState.intensities[sourceIndex] ?? 0
       const targetIntensity = waveState.intensities[targetIndex] ?? 0
       const intensity =
-        waveState.phase === null || !isAdjacent
+        !isTraining || waveState.phase === null || !isAdjacent
           ? 0
           : Math.min(sourceIntensity, targetIntensity)
+      const edgeValue = randomEdgeValueByIdRef.current.get(edge.id) ?? 0
+      const flowBlend = clamp01(intensity)
+      const activeValue = clampSigned(
+        edgeValue * (0.9 + flowBlend * 0.2)
+      )
 
       flows.set(edge.id, {
         active: intensity > 0,
         intensity,
-        value: edgeValueByEdgeId.get(edge.id) ?? 0,
-        phase: waveState.phase,
+        value: isTraining ? activeValue : edgeValue,
+        phase: isTraining ? waveState.phase : null,
       })
     })
 
     return flows
-  }, [edgeValueByEdgeId, edges, orderIndex, trainingStatus, waveState])
+  }, [edges, orderIndex, trainingStatus, waveState])
 
   useEffect(() => {
     if (!highlightSelectionActive || !highlightSelectionStart || !highlightSelectionEnd) {
@@ -367,19 +421,6 @@ function buildNodeTrainingValues(
   return values
 }
 
-function buildEdgeTrainingValues(
-  edges: Record<string, Edge>,
-  nodeValues: Map<string, number>
-): Map<string, number> {
-  const values = new Map<string, number>()
-  Object.values(edges).forEach((edge) => {
-    const sourceValue = nodeValues.get(edge.source) ?? 0
-    const targetValue = nodeValues.get(edge.target) ?? 0
-    values.set(edge.id, clampSigned((sourceValue + targetValue) / 2))
-  })
-  return values
-}
-
 function extractNormalizedParameterValues(
   weights: WeightSnapshot | null,
   parameterKind: 'weight' | 'bias'
@@ -394,7 +435,9 @@ function extractNormalizedParameterValues(
       if (indexA !== indexB) return indexA - indexB
       return nameA.localeCompare(nameB)
     })
-    .map(([, stats]) => normalizeWeightMean(stats.mean, stats.min, stats.max))
+    .map(([, stats]) =>
+      normalizeWeightMean(stats.mean, stats.std, stats.min, stats.max)
+    )
 }
 
 function extractLayerParamIndex(paramName: string): number {
@@ -403,18 +446,40 @@ function extractLayerParamIndex(paramName: string): number {
   return Number(match[1])
 }
 
-function normalizeWeightMean(mean: number, min: number, max: number): number {
-  const range = max - min
-  if (!Number.isFinite(range) || range <= 1e-8) {
-    return clampSigned(mean)
-  }
-  const center = (max + min) / 2
-  const normalized = (mean - center) / (range / 2)
-  return clampSigned(Math.tanh(normalized * 1.7))
+function normalizeWeightMean(mean: number, std: number, min: number, max: number): number {
+  const safeSpread = Math.max(Math.abs(min), Math.abs(max), 1e-6)
+  const spreadSignal = mean / safeSpread
+  const safeStd = Math.max(Number.isFinite(std) ? std : 0, safeSpread * 0.04, 0.01)
+  const zSignal = mean / safeStd
+  const mixedSignal = spreadSignal * 0.3 + zSignal * 0.7
+  const contrasted = Math.sign(mixedSignal) * Math.pow(Math.abs(mixedSignal), 0.78)
+  return clampSigned(Math.tanh(contrasted * 4.2))
 }
 
 function clampSigned(value: number): number {
   return Math.min(1, Math.max(-1, value))
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value))
+}
+
+function randomSigned(): number {
+  return Math.random() * 2 - 1
+}
+
+function sampleNormal(mean: number, stdDev: number): number {
+  const safeStd = Math.max(0.000001, stdDev)
+  let u = 0
+  let v = 0
+  while (u === 0) {
+    u = Math.random()
+  }
+  while (v === 0) {
+    v = Math.random()
+  }
+  const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v)
+  return mean + z * safeStd
 }
 
 function isTrainableLayerType(type: LayerNode['type'] | undefined): boolean {

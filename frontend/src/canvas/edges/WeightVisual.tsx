@@ -7,15 +7,24 @@ interface WeightVisualProps {
   speed: number
   color: string
   size?: number
+  opacity?: number
+  offset?: number
 }
 
 /**
  * Animated particle that travels along an edge during training
  * to visualize gradient flow.
  */
-export function WeightVisual({ curve, speed, color, size = 0.045 }: WeightVisualProps) {
+export function WeightVisual({
+  curve,
+  speed,
+  color,
+  size = 0.045,
+  opacity = 1,
+  offset = 0,
+}: WeightVisualProps) {
   const meshRef = useRef<THREE.Mesh>(null)
-  const tRef = useRef(0)
+  const tRef = useRef(normalizeOffset(offset))
 
   useFrame((_, delta) => {
     if (!meshRef.current) return
@@ -33,7 +42,15 @@ export function WeightVisual({ curve, speed, color, size = 0.045 }: WeightVisual
   return (
     <mesh ref={meshRef}>
       <sphereGeometry args={[size, 10, 10]} />
-      <meshBasicMaterial color={color} />
+      <meshBasicMaterial color={color} transparent opacity={opacity} />
     </mesh>
   )
+}
+
+function normalizeOffset(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  let normalized = value
+  while (normalized > 1) normalized -= 1
+  while (normalized < 0) normalized += 1
+  return normalized
 }

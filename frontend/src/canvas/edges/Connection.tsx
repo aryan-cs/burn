@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import type { LayerNode } from '../../store/graphStore'
 import type { TrainingFlowPhase } from '../nodes/LayerNode'
@@ -33,6 +33,8 @@ interface ConnectionProps {
 const EDGE_VALUE_LOW_COLOR = new THREE.Color('#ff4747')
 const EDGE_VALUE_MID_COLOR = new THREE.Color('#ffffff')
 const EDGE_VALUE_HIGH_COLOR = new THREE.Color('#4eff8e')
+const SEGMENT_SAMPLE_STD_DEV = 0.34
+const SEGMENT_STEP_SCALE = 0.2
 
 export function Connection({
   sourceNode,
@@ -47,14 +49,95 @@ export function Connection({
 
     return buildSampledSegments(sourceNode, targetNode, MAX_SEGMENTS_FULL_DETAIL)
   }, [sourceNode, targetNode, lowDetailMode])
+  const segmentCount = Math.floor(segmentPositions.length / 6)
+  const segmentStateRef = useRef<{
+    count: number
+    centers: Float32Array
+    values: Float32Array
+  } | null>(null)
+  const [segmentColorVersion, setSegmentColorVersion] = useState(0)
+
+  useEffect(() => {
+    if (segmentCount <= 0) {
+      segmentStateRef.current = null
+      return
+    }
+    const currentState = segmentStateRef.current
+    if (currentState && currentState.count === segmentCount) {
+      return
+    }
+
+    const centers = new Float32Array(segmentCount)
+    const values = new Float32Array(segmentCount)
+    for (let index = 0; index < segmentCount; index += 1) {
+      const center = randomSigned()
+      centers[index] = center
+      values[index] = center * 0.16
+    }
+    segmentStateRef.current = { count: segmentCount, centers, values }
+    setSegmentColorVersion((value) => value + 1)
+  }, [segmentCount])
+
+  useEffect(() => {
+    if (trainingFlow?.phase === null) return
+    const state = segmentStateRef.current
+    if (!state || state.count <= 0) return
+
+    for (let index = 0; index < state.count; index += 1) {
+      const sample = sampleNormal(state.centers[index], SEGMENT_SAMPLE_STD_DEV)
+      state.values[index] = clampSigned(state.values[index] + sample * SEGMENT_STEP_SCALE)
+    }
+    setSegmentColorVersion((value) => value + 1)
+  }, [trainingFlow?.phase])
+
+  const segmentColorData = useMemo(() => {
+    const state = segmentStateRef.current
+    if (!state || state.count <= 0 || state.count !== segmentCount) {
+      const fallback = clampSigned(trainingFlow?.value ?? 0)
+      return {
+        colors: undefined as Float32Array | undefined,
+        meanValue: fallback,
+        meanAbs: Math.abs(fallback),
+      }
+    }
+
+    const colors = new Float32Array(state.count * 6)
+    const color = new THREE.Color()
+    let valueSum = 0
+    let valueAbsSum = 0
+    for (let index = 0; index < state.count; index += 1) {
+      const signedValue = clampSigned(state.values[index])
+      valueSum += signedValue
+      valueAbsSum += Math.abs(signedValue)
+      setColorFromSignedValue(color, signedValue)
+
+      const base = index * 6
+      colors[base] = color.r
+      colors[base + 1] = color.g
+      colors[base + 2] = color.b
+      colors[base + 3] = color.r
+      colors[base + 4] = color.g
+      colors[base + 5] = color.b
+    }
+
+    return {
+      colors,
+      meanValue: valueSum / state.count,
+      meanAbs: valueAbsSum / state.count,
+    }
+  }, [segmentCount, segmentColorVersion, trainingFlow?.value])
+
   const lineColor = useMemo(
-    () => getEdgeColor(trainingFlow?.value ?? 0),
-    [trainingFlow?.value]
+    () => getEdgeColor(segmentColorData.meanValue),
+    [segmentColorData.meanValue]
   )
   const flowIntensity = Math.min(1, Math.max(0, trainingFlow?.intensity ?? 0))
+  const colorStrength = Math.min(1, segmentColorData.meanAbs)
   const hasTrainingFlow = Boolean(trainingFlow)
   const lineOpacity = hasTrainingFlow
-    ? 0.3 + flowIntensity * 0.56
+    ? trainingFlow?.active
+      ? 0.34 + flowIntensity * 0.5
+      : 0.24 + colorStrength * 0.56
     : lowDetailMode
       ? 0.55
       : 0.38
@@ -92,9 +175,13 @@ export function Connection({
       <lineSegments>
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[segmentPositions, 3]} />
+          {segmentColorData.colors ? (
+            <bufferAttribute attach="attributes-color" args={[segmentColorData.colors, 3]} />
+          ) : null}
         </bufferGeometry>
         <lineBasicMaterial
-          color={hasTrainingFlow ? lineColor : lowDetailMode ? '#5f6268' : '#525252'}
+          color={segmentColorData.colors ? '#ffffff' : hasTrainingFlow ? lineColor : lowDetailMode ? '#5f6268' : '#525252'}
+          vertexColors={Boolean(segmentColorData.colors)}
           transparent
           opacity={lineOpacity}
         />
@@ -275,4 +362,36 @@ function getEdgeColor(value: number): string {
     color.lerp(EDGE_VALUE_LOW_COLOR, Math.abs(clamped))
   }
   return `#${color.getHexString()}`
+}
+
+function setColorFromSignedValue(target: THREE.Color, value: number) {
+  const clamped = clampSigned(value)
+  target.copy(EDGE_VALUE_MID_COLOR)
+  if (clamped >= 0) {
+    target.lerp(EDGE_VALUE_HIGH_COLOR, clamped)
+  } else {
+    target.lerp(EDGE_VALUE_LOW_COLOR, Math.abs(clamped))
+  }
+}
+
+function clampSigned(value: number): number {
+  return Math.min(1, Math.max(-1, value))
+}
+
+function randomSigned(): number {
+  return Math.random() * 2 - 1
+}
+
+function sampleNormal(mean: number, stdDev: number): number {
+  const safeStd = Math.max(stdDev, 0.000001)
+  let u = 0
+  let v = 0
+  while (u === 0) {
+    u = Math.random()
+  }
+  while (v === 0) {
+    v = Math.random()
+  }
+  const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v)
+  return mean + z * safeStd
 }

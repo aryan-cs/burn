@@ -4,6 +4,7 @@ import './modelHub.css'
 const NN = 'Neural Network'
 const RF = 'Random Forest'
 const VLM = 'Vision-Language'
+const LLM = 'LLM'
 const SVM = 'SVM'
 const PCA = 'PCA'
 const LINREG = 'Linear Regression'
@@ -44,7 +45,7 @@ type LaunchCard = {
   description: string
   href: string
   badge: string
-  tone: 'nn' | 'rf' | 'vlm' | 'svm' | 'pca' | 'linreg' | 'logreg'
+  tone: 'nn' | 'rf' | 'vlm' | 'llm' | 'svm' | 'pca' | 'linreg' | 'logreg'
 }
 
 const SCRATCH_CARDS: LaunchCard[] = [
@@ -108,10 +109,75 @@ const SCRATCH_CARDS: LaunchCard[] = [
 
 const PRESET_CARDS: LaunchCard[] = [
   {
+    title: 'GPT-2 Visualizer',
+    subtitle: 'Preset Project',
+    description: 'Coming soon!',
+    href: '#',
+    badge: LLM,
+    tone: 'llm',
+  },
+  {
+    title: 'BERT Visualizer',
+    subtitle: 'Preset Project',
+    description: 'Coming soon!',
+    href: '#',
+    badge: LLM,
+    tone: 'llm',
+  },
+  {
+    title: 'NVIDIA Nemotron 3 Nano 30B Visualizer',
+    subtitle: 'Preset Project',
+    description: 'Coming soon!',
+    href: '#',
+    badge: LLM,
+    tone: 'llm',
+  },
+  {
+    title: 'NVIDIA Nemotron Nano 9B v2 Visualizer',
+    subtitle: 'Preset Project',
+    description: 'Coming soon!',
+    href: '#',
+    badge: LLM,
+    tone: 'llm',
+  },
+  {
+    title: 'Gemma 3 4B Visualizer',
+    subtitle: 'Preset Project',
+    description: 'Coming soon!',
+    href: '#',
+    badge: LLM,
+    tone: 'llm',
+  },
+  {
+    title: 'GPT-OSS 120B Visualizer',
+    subtitle: 'Preset Project',
+    description: 'Coming soon!',
+    href: '#',
+    badge: LLM,
+    tone: 'llm',
+  },
+  {
+    title: 'ResNet Visualizer',
+    subtitle: 'Preset Project',
+    description: 'Coming soon!',
+    href: '#',
+    badge: LLM,
+    tone: 'llm',
+  },
+  {
     title: 'MNIST Baseline MLP',
     subtitle: 'Preset Project',
     description: 'Input -> Flatten -> Dense -> Output. Good default for first compile/train.',
     href: '/nn?mode=preset&template=mnist_basic',
+    badge: NN,
+    tone: 'nn',
+  },
+  {
+    title: 'AlexNet Cats vs Dogs',
+    subtitle: 'Preset Project',
+    description:
+      'True AlexNet stack (conv/pool/fc) trained on Kaggle Cats vs Dogs at 96x96.',
+    href: '/nn?mode=preset&template=alexnet_cats_dogs',
     badge: NN,
     tone: 'nn',
   },
@@ -173,6 +239,14 @@ const PRESET_CARDS: LaunchCard[] = [
     tone: 'vlm',
   },
   {
+    title: 'Nemotron Nano 12B v2 [VL] Visualizer',
+    subtitle: 'Preset Project',
+    description: 'Coming soon!',
+    href: '#',
+    badge: VLM,
+    tone: 'vlm',
+  },
+  {
     title: 'Study Hours Regressor',
     subtitle: 'Preset Project',
     description:
@@ -190,8 +264,41 @@ const PRESET_CARDS: LaunchCard[] = [
     badge: LINREG,
     tone: 'linreg',
   },
+  {
+    title: 'Ridge Regression Visualizer',
+    subtitle: 'Preset Project',
+    description: 'Coming soon!',
+    href: '#',
+    badge: LINREG,
+    tone: 'linreg',
+  },
+  {
+    title: 'Lasso Regression Visualizer',
+    subtitle: 'Preset Project',
+    description: 'Coming soon!',
+    href: '#',
+    badge: LINREG,
+    tone: 'linreg',
+  },
+  {
+    title: 'Elastic Net Visualizer',
+    subtitle: 'Preset Project',
+    description: 'Coming soon!',
+    href: '#',
+    badge: LINREG,
+    tone: 'linreg',
+  },
+  {
+    title: 'Bayesian Linear Regression Visualizer',
+    subtitle: 'Preset Project',
+    description: 'Coming soon!',
+    href: '#',
+    badge: LINREG,
+    tone: 'linreg',
+  },
 ]
 
+const LLM_PRESET_CARDS = PRESET_CARDS.filter((card) => card.tone === 'llm')
 const NN_PRESET_CARDS = PRESET_CARDS.filter((card) => card.tone === 'nn')
 const RF_PRESET_CARDS = PRESET_CARDS.filter((card) => card.tone === 'rf')
 const VLM_PRESET_CARDS = PRESET_CARDS.filter((card) => card.tone === 'vlm')
@@ -527,6 +634,18 @@ export default function ModelHubPage() {
             Ready-to-run projects grouped by model family so you can compare workflows quickly.
           </p>
           <div className="hub-family-grid">
+            <article className="hub-family-panel hub-family-panel-llm">
+              <header className="hub-family-head">
+                <div className="hub-family-label">Large Language Models</div>
+                <div className="hub-family-meta">Transformers · Text Generation</div>
+              </header>
+              <div className="hub-grid hub-grid-family">
+                {LLM_PRESET_CARDS.map((card) => (
+                  <LaunchCardView key={card.title} card={card} />
+                ))}
+              </div>
+            </article>
+
             <article className="hub-family-panel hub-family-panel-nn">
               <header className="hub-family-head">
                 <div className="hub-family-label">Neural Networks</div>

@@ -47,6 +47,11 @@ class RFTrainingConfigIn(BaseModel):
         validation_alias=AliasChoices("log_every_trees", "logEveryTrees"),
         serialization_alias="log_every_trees",
     )
+    ensemble_strategy: str = Field(
+        default="bagging",
+        validation_alias=AliasChoices("ensemble_strategy", "ensembleStrategy"),
+        serialization_alias="ensemble_strategy",
+    )
 
 
 class RFGraphSpec(BaseModel):

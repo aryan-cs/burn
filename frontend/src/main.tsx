@@ -5,6 +5,7 @@ import DeploymentsPage from './deployments/DeploymentsPage'
 import ModelHubPage from './launch/ModelHubPage'
 import NNBootstrapPage from './nn/NNBootstrapPage'
 import RFBootstrapPage from './rf/RFBootstrapPage'
+import VLMBootstrapPage from './vlm/VLMBootstrapPage'
 
 const path = window.location.pathname.toLowerCase()
 
@@ -22,6 +23,7 @@ function resolveTitle(currentPath: string): string {
 
 function resolveEntry() {
   if (path.startsWith('/deployments')) return <DeploymentsPage />
+  if (path.startsWith('/vlm')) return <VLMBootstrapPage />
   if (path.startsWith('/rf')) return <RFBootstrapPage />
   if (path.startsWith('/nn')) return <NNBootstrapPage />
   return <ModelHubPage />

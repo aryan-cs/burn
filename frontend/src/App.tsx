@@ -161,9 +161,6 @@ function App() {
   const selectedCols = selectedNode?.type === 'Input'
     ? (selectedInputShape?.[2] ?? DEFAULT_INPUT_SHAPE[2])
     : toPositiveInt(selectedNode?.config.cols, DEFAULT_LAYER_COLS)
-  const selectedChannels = selectedNode?.type === 'Input'
-    ? (selectedInputShape?.[0] ?? DEFAULT_INPUT_SHAPE[0])
-    : DEFAULT_INPUT_SHAPE[0]
   const selectedUnits = selectedNode?.type === 'Dense'
     ? toPositiveInt(nodeUnits(selectedNode), DEFAULT_LAYER_ROWS * DEFAULT_LAYER_COLS)
     : DEFAULT_LAYER_ROWS * DEFAULT_LAYER_COLS
@@ -514,9 +511,9 @@ function App() {
     if (!Number.isInteger(nextRows) || nextRows <= 0) return
 
     if (selectedNode.type === 'Input') {
-      const [channels, _height, width] = toInputShapeOrDefault(selectedNode.config.shape)
+      const [, _height, width] = toInputShapeOrDefault(selectedNode.config.shape)
       updateNodeConfig(selectedNodeId, {
-        shape: [channels, nextRows, width],
+        shape: [1, nextRows, width],
       })
       setHasValidatedModel(false)
       return
@@ -536,9 +533,9 @@ function App() {
     if (!Number.isInteger(nextCols) || nextCols <= 0) return
 
     if (selectedNode.type === 'Input') {
-      const [channels, height] = toInputShapeOrDefault(selectedNode.config.shape)
+      const [, height] = toInputShapeOrDefault(selectedNode.config.shape)
       updateNodeConfig(selectedNodeId, {
-        shape: [channels, height, nextCols],
+        shape: [1, height, nextCols],
       })
       setHasValidatedModel(false)
       return
@@ -556,15 +553,6 @@ function App() {
     if (!selectedNodeId || !selectedNode) return
     if (selectedNode.type !== 'Dense' && selectedNode.type !== 'Output') return
     updateNodeConfig(selectedNodeId, { activation: nextActivation })
-    setHasValidatedModel(false)
-  }
-
-  const handleChannelsChange = (nextValue: string) => {
-    if (!selectedNodeId || selectedNode?.type !== 'Input') return
-    const channels = Number(nextValue)
-    if (!Number.isInteger(channels) || channels <= 0) return
-    const [, height, width] = toInputShapeOrDefault(selectedNode.config.shape)
-    updateNodeConfig(selectedNodeId, { shape: [channels, height, width] })
     setHasValidatedModel(false)
   }
 
@@ -882,7 +870,6 @@ function App() {
               selectedDisplayName={selectedDisplayName}
               selectedRows={selectedRows}
               selectedCols={selectedCols}
-              selectedChannels={selectedChannels}
               selectedUnits={selectedUnits}
               selectedDropoutRate={selectedDropoutRate}
               selectedOutputClasses={selectedOutputClasses}
@@ -895,7 +882,6 @@ function App() {
               canEditActivation={
                 selectedNode?.type === 'Dense' || selectedNode?.type === 'Output'
               }
-              canEditChannels={selectedNode?.type === 'Input'}
               canEditUnits={selectedNode?.type === 'Dense'}
               canEditDropoutRate={selectedNode?.type === 'Dropout'}
               canEditOutputClasses={selectedNode?.type === 'Output'}
@@ -914,7 +900,6 @@ function App() {
               onNameCancel={cancelNameEdit}
               onRowsChange={handleRowsChange}
               onColsChange={handleColsChange}
-              onChannelsChange={handleChannelsChange}
               onUnitsChange={handleUnitsChange}
               onDropoutRateChange={handleDropoutRateChange}
               onOutputClassesChange={handleOutputClassesChange}
@@ -1040,7 +1025,7 @@ function App() {
               width="16px"
               fill="#e3e3e3"
             >
-              <path d="M560-80 160-480l400-400 71 71-329 329 329 329-71 71Z" />
+              <path d="M400-80 0-480l400-400 71 71-329 329 329 329-71 71Z" />
             </svg>
           )}
         </button>
@@ -1223,9 +1208,14 @@ function getLayerSizeLabel(node: LayerNode): string {
   if (node.type === 'Input') {
     const shape = toShapeArray(node.config.shape)
     if (shape) {
+      if (shape.length >= 2) {
+        const rows = shape[shape.length - 2]
+        const cols = shape[shape.length - 1]
+        return `${rows} x ${cols}`
+      }
       return shape.join(' x ')
     }
-    return DEFAULT_INPUT_SHAPE.join(' x ')
+    return `${DEFAULT_INPUT_SHAPE[1]} x ${DEFAULT_INPUT_SHAPE[2]}`
   }
 
   if (node.type === 'Output') {

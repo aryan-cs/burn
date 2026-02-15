@@ -31,16 +31,16 @@ export function RfPort({ nodeId, type, position }: RfPortProps) {
   }
 
   const color = isSource
-    ? '#00f8aa'
+    ? '#ffb429'
     : canReceive && hovered
-      ? '#68ffaf'
-      : canReceive
-        ? '#78dca8'
+      ? '#ffc766'
+    : canReceive
+        ? '#ffb429'
         : hovered
-          ? '#f6fdff'
+          ? '#f6f6f6'
           : type === 'output'
-            ? '#67b4ff'
-            : '#ff8f6c'
+            ? '#4da3ff'
+            : '#f0f0f0'
 
   return (
     <mesh

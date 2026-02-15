@@ -1,5 +1,12 @@
 import { create } from 'zustand'
-import type { RFEdge, RFGraphPayload, RFNode, RFNodeType, RFTrainingConfig } from '../types'
+import type {
+  RFEdge,
+  RFGraphPayload,
+  RFNode,
+  RFNodeType,
+  RFTrainingConfig,
+  RFVisualizationConfig,
+} from '../types'
 
 interface DatasetDefaults {
   shape: number[]
@@ -18,6 +25,14 @@ const DEFAULT_TRAINING: RFTrainingConfig = {
   randomState: 42,
   stratify: true,
   logEveryTrees: 5,
+  ensembleStrategy: 'bagging',
+}
+
+const DEFAULT_VISUALIZATION: RFVisualizationConfig = {
+  visibleTrees: 18,
+  treeDepth: 4,
+  treeSpread: 1,
+  nodeScale: 1,
 }
 
 function createPresetGraph(dataset: string): { nodes: RFNode[]; edges: RFEdge[] } {
@@ -84,6 +99,7 @@ interface RFGraphState {
   selectedEdgeId: string | null
   connectionSource: string | null
   training: RFTrainingConfig
+  visualization: RFVisualizationConfig
   addNode: (type: RFNodeType, position?: [number, number, number]) => string
   removeNode: (nodeId: string) => void
   addEdge: (sourceId: string, targetId: string) => string
@@ -96,6 +112,7 @@ interface RFGraphState {
   clearGraph: () => void
   setDataset: (dataset: string) => void
   setTraining: (patch: Partial<RFTrainingConfig>) => void
+  setVisualization: (patch: Partial<RFVisualizationConfig>) => void
   setNodeConfig: (nodeId: string, patch: Record<string, unknown>) => void
   resetPreset: () => void
   toPayload: () => RFGraphPayload
@@ -117,6 +134,7 @@ export const useRFGraphStore = create<RFGraphState>((set, get) => {
     selectedEdgeId: null,
     connectionSource: null,
     training: { ...DEFAULT_TRAINING },
+    visualization: { ...DEFAULT_VISUALIZATION },
 
     addNode: (type, position) => {
       const id = `rf_node_${nextNodeId++}`
@@ -239,6 +257,11 @@ export const useRFGraphStore = create<RFGraphState>((set, get) => {
         training: { ...state.training, ...patch },
       })),
 
+    setVisualization: (patch) =>
+      set((state) => ({
+        visualization: { ...state.visualization, ...patch },
+      })),
+
     setNodeConfig: (nodeId, patch) =>
       set((state) => ({
         nodes: {
@@ -282,6 +305,7 @@ export const useRFGraphStore = create<RFGraphState>((set, get) => {
           random_state: state.training.randomState,
           stratify: state.training.stratify,
           log_every_trees: state.training.logEveryTrees,
+          ensemble_strategy: state.training.ensembleStrategy,
         },
       }
     },

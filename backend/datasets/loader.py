@@ -7,6 +7,7 @@ import random
 import shutil
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 from typing import Iterable
 
@@ -43,6 +44,15 @@ CATS_DOGS_REF_CANDIDATES = (
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 VALID_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+# Some Kaggle image archives include files with truncated TIFF/EXIF payloads.
+# We already skip unreadable samples in dataset access, so suppress this noisy warning.
+warnings.filterwarnings(
+    "ignore",
+    message="Truncated File Read",
+    category=UserWarning,
+    module=r"PIL\.TiffImagePlugin",
+)
 
 
 class _ImagePathDataset(Dataset):

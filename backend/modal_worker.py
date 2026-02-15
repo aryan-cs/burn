@@ -262,6 +262,8 @@ def train_job_remote(
     print(f"[modal][train_job_remote] device={device}", flush=True)
     if device.type == "cuda":
         torch.backends.cudnn.benchmark = True
+        # Enable TF32 path for float32 matmuls on Ampere+ GPUs (e.g. H100).
+        torch.set_float32_matmul_precision("high")
 
     use_amp = device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)

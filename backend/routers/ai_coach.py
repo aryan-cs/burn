@@ -43,6 +43,69 @@ class NnCoachResponse(BaseModel):
     source: Literal["openai", "gemini", "anthropic", "nvidia", "unavailable", "error"]
 
 
+class RecommendRequest(BaseModel):
+    description: str = Field(min_length=1, max_length=2000)
+    provider: Provider = "nvidia"
+    model: str | None = None
+
+
+class RecommendResponse(BaseModel):
+    recommendation: str
+    source: Literal["openai", "gemini", "anthropic", "nvidia", "unavailable", "error"]
+
+
+@router.post("/recommend", response_model=RecommendResponse)
+async def recommend_algorithm(payload: RecommendRequest) -> RecommendResponse:
+    provider = (payload.provider or "nvidia").strip().lower()
+    model = (payload.model or _default_model(provider)).strip()
+
+    if provider not in {"openai", "gemini", "anthropic", "nvidia"}:
+        return RecommendResponse(recommendation="", source="error")
+
+    system_prompt = (
+        "You are Burn, an expert machine learning advisor. "
+        "The user will describe their problem, data, or goal. "
+        "Your job is to recommend the BEST machine learning algorithm for their use case from this list:\n"
+        "1. Neural Network (deep learning, image classification, complex patterns)\n"
+        "2. Random Forest (tabular data, classification, feature importance)\n"
+        "3. Support Vector Machine / SVM (small-to-medium datasets, binary classification, high-dimensional)\n"
+        "4. Linear Regression (continuous output, linear relationships)\n"
+        "5. Logistic Regression (binary/multi-class classification, interpretability)\n"
+        "6. PCA / Principal Component Analysis (dimensionality reduction, feature extraction)\n"
+        "7. Vision-Language Model / VLM (image+text understanding)\n\n"
+        "Structure your answer exactly like this:\n"
+        "RECOMMENDED: <algorithm name>\n\n"
+        "Then give a clear, concise explanation (4-8 lines) of WHY this algorithm fits their use case, "
+        "what trade-offs to consider, and a brief mention of alternatives. "
+        "Be practical and direct."
+    )
+
+    history: list[dict[str, str]] = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": payload.description},
+    ]
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            if provider == "openai":
+                answer = await _call_openai(client, history, model)
+            elif provider == "nvidia":
+                answer = await _call_nvidia(client, history, model)
+            elif provider == "gemini":
+                answer = await _call_gemini(client, history, model, system_prompt)
+            else:
+                answer = await _call_anthropic(client, history, model, system_prompt)
+
+        if not answer:
+            return RecommendResponse(recommendation="", source="error")
+
+        return RecommendResponse(recommendation=answer, source=provider)  # type: ignore[arg-type]
+    except MissingProviderKey:
+        return RecommendResponse(recommendation="", source="unavailable")
+    except Exception:
+        return RecommendResponse(recommendation="", source="error")
+
+
 @router.post("/nn-coach", response_model=NnCoachResponse)
 async def nn_coach(payload: NnCoachRequest) -> NnCoachResponse:
     provider = (payload.provider or os.getenv("AI_PROVIDER", "openai")).strip().lower()

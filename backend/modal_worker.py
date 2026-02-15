@@ -104,6 +104,15 @@ def _to_inference_tensor(raw_inputs: Any, expected_shape: list[int] | None) -> t
 
     expected_rank = len(expected_shape)
     expected_elems = math.prod(expected_shape)
+    # Accept a common shorthand for single-channel images:
+    # [H, W] -> [1, H, W] before adding batch.
+    if (
+        expected_rank >= 2
+        and expected_shape[0] == 1
+        and tensor.ndim == expected_rank - 1
+        and list(tensor.shape) == expected_shape[1:]
+    ):
+        tensor = tensor.unsqueeze(0)
     if tensor.ndim == expected_rank:
         return tensor.unsqueeze(0)
     if tensor.ndim == expected_rank + 1:

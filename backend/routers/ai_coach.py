@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+import io
 import os
-from typing import Literal
+import wave
+from threading import Lock
+from typing import Any, Literal
 
 import httpx
-from fastapi import APIRouter
+import numpy as np
+import torch
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/ai", tags=["ai-coach"])
@@ -52,6 +59,129 @@ class RecommendRequest(BaseModel):
 class RecommendResponse(BaseModel):
     recommendation: str
     source: Literal["openai", "gemini", "anthropic", "nvidia", "unavailable", "error"]
+
+
+class WhisperSttResponse(BaseModel):
+    text: str
+    source: Literal["whisper"]
+    model: str
+
+
+class ChatterboxTtsRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=1500)
+    exaggeration: float = Field(default=0.45, ge=0.0, le=2.0)
+    cfg_weight: float = Field(default=0.5, ge=0.0, le=2.5)
+    temperature: float = Field(default=0.8, ge=0.0, le=2.0)
+
+
+class SpeechModelUnavailable(Exception):
+    pass
+
+
+class WhisperTranscriber:
+    def __init__(self) -> None:
+        self._pipeline: Any | None = None
+        self._lock = Lock()
+
+    @property
+    def model_name(self) -> str:
+        return os.getenv("WHISPER_MODEL", "openai/whisper-small")
+
+    def _ensure_pipeline(self) -> Any:
+        if self._pipeline is not None:
+            return self._pipeline
+
+        with self._lock:
+            if self._pipeline is not None:
+                return self._pipeline
+            try:
+                from transformers import pipeline
+            except Exception as exc:
+                raise SpeechModelUnavailable(
+                    "Whisper dependencies are unavailable. Install torch + transformers."
+                ) from exc
+
+            device = 0 if torch.cuda.is_available() else -1
+            self._pipeline = pipeline(
+                task="automatic-speech-recognition",
+                model=self.model_name,
+                device=device,
+            )
+
+        return self._pipeline
+
+    def transcribe_wav(self, audio_bytes: bytes, language: str | None = None) -> str:
+        audio_array, sample_rate = _decode_wav_audio(audio_bytes)
+        transcriber = self._ensure_pipeline()
+
+        kwargs: dict[str, Any] = {}
+        normalized_language = (language or "").strip()
+        if normalized_language:
+            kwargs["generate_kwargs"] = {"language": normalized_language}
+
+        result = transcriber(
+            {"array": audio_array, "sampling_rate": sample_rate},
+            **kwargs,
+        )
+        if isinstance(result, dict):
+            return str(result.get("text", "")).strip()
+        return str(result).strip()
+
+
+class ChatterboxSynthesizer:
+    def __init__(self) -> None:
+        self._model: Any | None = None
+        self._sample_rate = 24_000
+        self._lock = Lock()
+
+    @property
+    def model_name(self) -> str:
+        return "chatterbox-tts"
+
+    def _ensure_model(self) -> Any:
+        if self._model is not None:
+            return self._model
+
+        with self._lock:
+            if self._model is not None:
+                return self._model
+            try:
+                from chatterbox.tts import ChatterboxTTS
+            except Exception as exc:
+                raise SpeechModelUnavailable(
+                    "Chatterbox is unavailable. Install the open-source package: chatterbox-tts."
+                ) from exc
+
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            try:
+                model = ChatterboxTTS.from_pretrained(device=device)
+            except Exception as exc:
+                raise SpeechModelUnavailable(
+                    "Failed to load Chatterbox model weights."
+                ) from exc
+
+            sample_rate = getattr(model, "sr", None) or getattr(model, "sample_rate", None)
+            if isinstance(sample_rate, int) and sample_rate > 0:
+                self._sample_rate = sample_rate
+
+            self._model = model
+
+        return self._model
+
+    def synthesize(self, text: str, exaggeration: float, cfg_weight: float, temperature: float) -> tuple[bytes, int]:
+        model = self._ensure_model()
+        generated = model.generate(
+            text,
+            exaggeration=exaggeration,
+            cfg_weight=cfg_weight,
+            temperature=temperature,
+        )
+        waveform = _to_mono_waveform(generated)
+        return _encode_wav_audio(waveform, self._sample_rate), self._sample_rate
+
+
+whisper_transcriber = WhisperTranscriber()
+chatterbox_synthesizer = ChatterboxSynthesizer()
 
 
 @router.post("/recommend", response_model=RecommendResponse)
@@ -104,6 +234,63 @@ async def recommend_algorithm(payload: RecommendRequest) -> RecommendResponse:
         return RecommendResponse(recommendation="", source="unavailable")
     except Exception:
         return RecommendResponse(recommendation="", source="error")
+
+
+@router.post("/stt/whisper", response_model=WhisperSttResponse)
+async def stt_whisper(
+    audio: UploadFile = File(...),
+    language: str | None = None,
+) -> WhisperSttResponse:
+    payload = await audio.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Audio payload is empty.")
+
+    try:
+        transcript = await asyncio.to_thread(whisper_transcriber.transcribe_wav, payload, language)
+    except SpeechModelUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Whisper transcription failed.") from exc
+
+    return WhisperSttResponse(
+        text=transcript,
+        source="whisper",
+        model=whisper_transcriber.model_name,
+    )
+
+
+@router.post("/tts/chatterbox")
+async def tts_chatterbox(payload: ChatterboxTtsRequest) -> Response:
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Text must not be empty.")
+
+    try:
+        audio_bytes, sample_rate = await asyncio.to_thread(
+            chatterbox_synthesizer.synthesize,
+            text,
+            payload.exaggeration,
+            payload.cfg_weight,
+            payload.temperature,
+        )
+    except SpeechModelUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Chatterbox speech synthesis failed.") from exc
+
+    return Response(
+        content=audio_bytes,
+        media_type="audio/wav",
+        headers={
+            "X-TTS-Source": "chatterbox",
+            "X-TTS-Model": chatterbox_synthesizer.model_name,
+            "X-Sample-Rate": str(sample_rate),
+        },
+    )
 
 
 @router.post("/nn-coach", response_model=NnCoachResponse)
@@ -171,6 +358,85 @@ async def nn_coach(payload: NnCoachRequest) -> NnCoachResponse:
         return NnCoachResponse(tips=[], answer="", source="unavailable")
     except Exception:
         return NnCoachResponse(tips=[], answer="", source="error")
+
+
+def _decode_wav_audio(audio_bytes: bytes) -> tuple[np.ndarray, int]:
+    if not audio_bytes:
+        raise ValueError("Audio payload is empty.")
+
+    try:
+        with wave.open(io.BytesIO(audio_bytes), "rb") as wav_file:
+            channels = wav_file.getnchannels()
+            sample_width = wav_file.getsampwidth()
+            sample_rate = wav_file.getframerate()
+            frame_count = wav_file.getnframes()
+            raw = wav_file.readframes(frame_count)
+    except wave.Error as exc:
+        raise ValueError("Expected uncompressed WAV audio.") from exc
+
+    if channels <= 0 or sample_rate <= 0:
+        raise ValueError("Invalid WAV metadata.")
+    if frame_count <= 0 or not raw:
+        raise ValueError("WAV audio has no frames.")
+
+    if sample_width == 1:
+        waveform = (np.frombuffer(raw, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+    elif sample_width == 2:
+        waveform = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+    elif sample_width == 4:
+        waveform = np.frombuffer(raw, dtype="<i4").astype(np.float32) / 2147483648.0
+    else:
+        raise ValueError("Unsupported WAV sample width. Use 8/16/32-bit PCM.")
+
+    if waveform.size == 0:
+        raise ValueError("No decoded audio samples found.")
+
+    if channels > 1:
+        usable_size = (waveform.size // channels) * channels
+        waveform = waveform[:usable_size].reshape(-1, channels).mean(axis=1)
+
+    return waveform.astype(np.float32, copy=False), sample_rate
+
+
+def _to_mono_waveform(audio: Any) -> np.ndarray:
+    if isinstance(audio, torch.Tensor):
+        waveform = audio.detach().cpu().float().numpy()
+    else:
+        waveform = np.asarray(audio, dtype=np.float32)
+
+    if waveform.ndim == 0:
+        raise ValueError("Synthesized audio format is invalid.")
+
+    if waveform.ndim == 1:
+        mono = waveform
+    elif waveform.ndim == 2:
+        if waveform.shape[0] <= 4 and waveform.shape[1] > waveform.shape[0]:
+            mono = waveform.mean(axis=0)
+        elif waveform.shape[1] <= 4:
+            mono = waveform.mean(axis=1)
+        else:
+            mono = waveform.reshape(-1)
+    else:
+        mono = waveform.reshape(-1)
+
+    mono = np.nan_to_num(mono.astype(np.float32, copy=False), nan=0.0, posinf=1.0, neginf=-1.0)
+    return np.clip(mono, -1.0, 1.0)
+
+
+def _encode_wav_audio(waveform: np.ndarray, sample_rate: int) -> bytes:
+    if sample_rate <= 0:
+        raise ValueError("Sample rate must be positive.")
+    if waveform.size == 0:
+        raise ValueError("No audio samples to encode.")
+
+    pcm = (np.clip(waveform, -1.0, 1.0) * 32767.0).astype("<i2")
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(pcm.tobytes())
+    return output.getvalue()
 
 
 class MissingProviderKey(Exception):

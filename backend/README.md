@@ -133,7 +133,15 @@ Behavior:
 - `POST /api/deploy/{deployment_id}/start`
 - `DELETE /api/deploy/{deployment_id}`
 - `GET /api/datasets`
+- `POST /api/ai/nn-coach`
+- `POST /api/ai/recommend`
+- `POST /api/ai/stt/whisper` (WAV upload)
+- `POST /api/ai/tts/chatterbox` (returns WAV audio)
 - `WS /ws/training/{job_id}`
+
+Speech model notes:
+- Whisper STT uses `WHISPER_MODEL` (default `openai/whisper-small`) and expects uncompressed WAV input.
+- Chatterbox TTS endpoint is wired in the API; install `chatterbox-tts` in your runtime environment to enable synthesis.
 
 ### Random Forest API
 

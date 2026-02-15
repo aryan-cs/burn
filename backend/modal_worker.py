@@ -74,6 +74,13 @@ def _compute_loss(
     return loss_fn(output, target)
 
 
+def _state_dict_for_export(model: nn.Module) -> dict[str, torch.Tensor]:
+    # torch.compile wraps the original module as `_orig_mod`; exporting the wrapped
+    # state dict would prefix keys and break load_state_dict on the API side.
+    inner_model = getattr(model, "_orig_mod", model)
+    return inner_model.state_dict()
+
+
 def _evaluate_model(
     model: nn.Module,
     dataloader,
@@ -231,7 +238,7 @@ def train_job_remote(graph_payload: dict[str, Any], training_payload: dict[str, 
         )
 
     buffer = io.BytesIO()
-    state_dict_cpu = {k: v.detach().to("cpu") for k, v in model.state_dict().items()}
+    state_dict_cpu = {k: v.detach().to("cpu") for k, v in _state_dict_for_export(model).items()}
     torch.save(state_dict_cpu, buffer)
     encoded_state = base64.b64encode(buffer.getvalue()).decode("ascii")
     print(

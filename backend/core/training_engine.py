@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -162,7 +163,7 @@ async def run_training_job(
                 try:
                     remote_result = await asyncio.to_thread(call.get, 1.0)
                     break
-                except ModalTimeoutError:
+                except (ModalTimeoutError, TimeoutError):
                     await asyncio.sleep(0)
 
             if not entry.stop_event.is_set():
@@ -173,7 +174,10 @@ async def run_training_job(
                 if not isinstance(encoded_state, str):
                     raise RuntimeError("Modal worker did not return model weights")
                 state_dict_bytes = base64.b64decode(encoded_state.encode("ascii"))
-                state_dict = torch.load(io.BytesIO(state_dict_bytes), map_location="cpu")
+                raw_state_dict = torch.load(io.BytesIO(state_dict_bytes), map_location="cpu")
+                if not isinstance(raw_state_dict, dict):
+                    raise RuntimeError("Modal worker returned invalid state_dict payload")
+                state_dict = _normalize_modal_state_dict_keys(raw_state_dict)
                 model.load_state_dict(state_dict)
 
                 epoch_metrics = remote_result.get("epoch_metrics", [])
@@ -335,8 +339,22 @@ async def run_training_job(
             )
 
     except Exception as exc:  # pragma: no cover - error path is tested at API level
-        message = str(exc)
+        message = str(exc) or f"{exc.__class__.__name__}: {exc!r}"
         await job_registry.publish(job_id, {"type": "error", "message": message})
         await job_registry.mark_terminal(job_id, "failed", error=message)
         if entry.job_dir is not None:
             update_job_metadata(entry.job_dir, status="failed", terminal=True, error=message)
+
+
+def _normalize_modal_state_dict_keys(
+    state_dict: dict[str, Any],
+) -> dict[str, Any]:
+    """Normalize keys produced by torch.compile-wrapped modules."""
+    prefix = "_orig_mod."
+    has_compiled_prefix = any(key.startswith(prefix) for key in state_dict)
+    if not has_compiled_prefix:
+        return state_dict
+    return {
+        (key[len(prefix) :] if key.startswith(prefix) else key): value
+        for key, value in state_dict.items()
+    }

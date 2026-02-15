@@ -24,7 +24,17 @@ def test_model_validate_and_compile(client) -> None:
     assert "class GeneratedModel" in compile_data["python_source"]
 
 
-def test_model_latest_endpoint(client) -> None:
+def test_datasets_endpoint_lists_digits(client) -> None:
+    res = client.get("/api/datasets")
+    assert res.status_code == 200
+    data = res.json()
+    dataset_ids = {entry["id"] for entry in data["datasets"]}
+    assert {"mnist", "digits"}.issubset(dataset_ids)
+
+
+def test_model_latest_endpoint(monkeypatch, client, tmp_path) -> None:
+    monkeypatch.setattr("routers.model.ARTIFACTS_DIR", tmp_path)
+
     latest_before = client.get("/api/model/latest")
     assert latest_before.status_code == 200
     assert latest_before.json()["job_id"] is None
@@ -49,6 +59,25 @@ def test_model_validate_error(client) -> None:
     assert any("unknown" in err["message"].lower() for err in data["errors"])
 
 
+def test_train_rejects_shape_for_selected_dataset(client) -> None:
+    payload = build_graph_payload(
+        training={
+            "dataset": "digits",
+            "epochs": 1,
+            "batchSize": 8,
+            "optimizer": "adam",
+            "learningRate": 0.001,
+            "loss": "cross_entropy",
+        }
+    )
+    # Graph is still [1, 28, 28] / 10-class MNIST-style, so digits contract should fail.
+    res = client.post("/api/model/train", json=payload)
+    assert res.status_code == 400
+    error_messages = [item["message"] for item in res.json()["detail"]["errors"]]
+    assert any("Digits" in message for message in error_messages)
+    assert any("Input.shape=[1, 8, 8]" in message for message in error_messages)
+
+
 def test_train_stop_and_export(monkeypatch, client, tmp_path) -> None:
     async def fake_run_training_job(job_id, compiled, training, artifacts_dir):
         entry = job_registry.get(job_id)
@@ -56,7 +85,9 @@ def test_train_stop_and_export(monkeypatch, client, tmp_path) -> None:
         job_registry.set_status(job_id, "running")
 
         # Simulate minimal train lifecycle and artifact creation.
-        artifact = tmp_path / f"{job_id}.pt"
+        artifact_dir = entry.job_dir or tmp_path
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        artifact = artifact_dir / "model.pt"
         artifact.write_bytes(b"fake-model")
 
         await asyncio.sleep(0.05)
@@ -77,6 +108,7 @@ def test_train_stop_and_export(monkeypatch, client, tmp_path) -> None:
         )
 
     monkeypatch.setattr("routers.model.run_training_job", fake_run_training_job)
+    monkeypatch.setattr("routers.model.ARTIFACTS_DIR", tmp_path)
 
     payload = build_graph_payload(
         training={
@@ -123,3 +155,12 @@ def test_train_stop_and_export(monkeypatch, client, tmp_path) -> None:
     pt_export = client.get(f"/api/model/export?job_id={job_id}&format=pt")
     assert pt_export.status_code == 200
     assert pt_export.content == b"fake-model"
+
+    # Ensure export works from persisted bundle even after in-memory registry reset.
+    job_registry.clear()
+    py_export_after_clear = client.get(f"/api/model/export?job_id={job_id}&format=py")
+    assert py_export_after_clear.status_code == 200
+    assert "class GeneratedModel" in py_export_after_clear.text
+    pt_export_after_clear = client.get(f"/api/model/export?job_id={job_id}&format=pt")
+    assert pt_export_after_clear.status_code == 200
+    assert pt_export_after_clear.content == b"fake-model"

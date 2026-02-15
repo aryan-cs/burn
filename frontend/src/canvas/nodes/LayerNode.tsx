@@ -50,23 +50,21 @@ export function LayerNode3D({ node, role }: { node: LayerNode; role: LayerRole }
   const primaryDragStartPositionRef = useRef(new THREE.Vector3())
   const hasRecordedMoveHistoryRef = useRef(false)
 
-  const selectedNodeId = useGraphStore((s) => s.selectedNodeId)
-  const draggingNodeId = useGraphStore((s) => s.draggingNodeId)
-  const highlightedNodeIds = useGraphStore((s) => s.highlightedNodeIds)
-  const connectionSource = useGraphStore((s) => s.connectionSource)
+  const isSelected = useGraphStore((s) => s.selectedNodeId === node.id)
+  const isDragging = useGraphStore((s) => s.draggingNodeId === node.id)
+  const isHighlighted = useGraphStore((s) => s.highlightedNodeIds.includes(node.id))
+  const isConnectionSource = useGraphStore((s) => s.connectionSource === node.id)
+  const isConnectionTarget = useGraphStore(
+    (s) => s.connectionSource !== null && s.connectionSource !== node.id
+  )
   const selectNode = useGraphStore((s) => s.selectNode)
   const setDraggingNodeId = useGraphStore((s) => s.setDraggingNodeId)
   const setNodesPosition = useGraphStore((s) => s.setNodesPosition)
   const startConnectionDrag = useGraphStore((s) => s.startConnectionDrag)
 
-  const isSelected = selectedNodeId === node.id
-  const isDragging = draggingNodeId === node.id
-  const isHighlighted = highlightedNodeIds.includes(node.id)
-  const isConnectionSource = connectionSource === node.id
-  const isConnectionTarget = connectionSource !== null && connectionSource !== node.id
-
-  const { rows, cols } = getLayerGridSize(node.config)
+  const { rows, cols } = getLayerGridSize(node.config, node.type)
   const nodePositions = useMemo(() => buildLayerLocalNodePositions(rows, cols), [rows, cols])
+  const sphereSegments = getSphereSegments(nodePositions.length)
   const baseColor = getLayerColor(role)
   const outlineOpacity = isConnectionSource
     ? NODE_OUTLINE_OPACITY_SOURCE
@@ -96,6 +94,7 @@ export function LayerNode3D({ node, role }: { node: LayerNode; role: LayerRole }
     setDraggingNodeId(node.id)
     ;(e.target as HTMLElement)?.setPointerCapture?.(e.pointerId)
 
+    const highlightedNodeIds = useGraphStore.getState().highlightedNodeIds
     const dragNodeIds = highlightedNodeIds.includes(node.id)
       ? highlightedNodeIds
       : [node.id]
@@ -177,7 +176,7 @@ export function LayerNode3D({ node, role }: { node: LayerNode; role: LayerRole }
             onPointerCancel={handlePointerUp}
           >
             <sphereGeometry
-              args={[LAYER_NODE_RADIUS, NODE_SPHERE_WIDTH_SEGMENTS, NODE_SPHERE_HEIGHT_SEGMENTS]}
+              args={[LAYER_NODE_RADIUS, sphereSegments, sphereSegments]}
             />
             <meshStandardMaterial
               color={NODE_CORE_COLOR}
@@ -197,7 +196,7 @@ export function LayerNode3D({ node, role }: { node: LayerNode; role: LayerRole }
             scale={[NODE_OUTLINE_SCALE, NODE_OUTLINE_SCALE, NODE_OUTLINE_SCALE]}
           >
             <sphereGeometry
-              args={[LAYER_NODE_RADIUS, NODE_SPHERE_WIDTH_SEGMENTS, NODE_SPHERE_HEIGHT_SEGMENTS]}
+              args={[LAYER_NODE_RADIUS, sphereSegments, sphereSegments]}
             />
             <meshBasicMaterial
               color={baseColor}
@@ -215,4 +214,11 @@ export function LayerNode3D({ node, role }: { node: LayerNode; role: LayerRole }
 
 function getLayerColor(role: LayerRole): string {
   return LAYER_ROLE_COLORS[role]
+}
+
+function getSphereSegments(nodeCount: number): number {
+  if (nodeCount >= 600) return 7
+  if (nodeCount >= 250) return 10
+  if (nodeCount >= 120) return 14
+  return NODE_SPHERE_WIDTH_SEGMENTS
 }

@@ -7,7 +7,11 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from sklearn.datasets import load_digits
+from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
+
+from datasets.registry import get_dataset_meta
 
 
 KAGGLE_DATASET_REF = "oddrationale/mnist-in-csv"
@@ -89,3 +93,42 @@ def get_mnist_dataloaders(batch_size: int) -> tuple[DataLoader, DataLoader]:
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=0)
     test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=0)
     return train_loader, test_loader
+
+
+def get_digits_dataloaders(batch_size: int) -> tuple[DataLoader, DataLoader]:
+    digits = load_digits()
+    features = digits.data.astype(np.float32, copy=False) / 16.0
+    labels = digits.target.astype(np.int64, copy=False)
+
+    train_x, test_x, train_y, test_y = train_test_split(
+        features,
+        labels,
+        test_size=0.2,
+        random_state=42,
+        stratify=labels,
+    )
+
+    train_x_tensor = torch.from_numpy(train_x).view(-1, 1, 8, 8)
+    test_x_tensor = torch.from_numpy(test_x).view(-1, 1, 8, 8)
+    train_y_tensor = torch.from_numpy(train_y)
+    test_y_tensor = torch.from_numpy(test_y)
+
+    train_set = torch.utils.data.TensorDataset(train_x_tensor, train_y_tensor)
+    test_set = torch.utils.data.TensorDataset(test_x_tensor, test_y_tensor)
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=0)
+    test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=0)
+    return train_loader, test_loader
+
+
+def get_dataset_dataloaders(dataset_id: str, batch_size: int) -> tuple[DataLoader, DataLoader]:
+    meta = get_dataset_meta(dataset_id)
+    if meta is None:
+        raise RuntimeError(f"Unsupported dataset for v1: {dataset_id}")
+
+    loader_id = str(meta.get("loader", "")).strip().lower()
+    if loader_id == "kaggle_mnist_csv":
+        return get_mnist_dataloaders(batch_size)
+    if loader_id == "sklearn_digits":
+        return get_digits_dataloaders(batch_size)
+
+    raise RuntimeError(f"Unsupported dataset loader for '{dataset_id}': {loader_id}")

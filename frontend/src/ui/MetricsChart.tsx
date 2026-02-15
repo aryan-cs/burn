@@ -10,8 +10,8 @@ export function MetricsChart() {
 
   if (metrics.length === 0 && status === 'idle') return null
 
-  const width = 280
-  const height = 120
+  const width = 200
+  const height = 50
   const padding = { top: 10, right: 10, bottom: 20, left: 35 }
   const plotW = width - padding.left - padding.right
   const plotH = height - padding.top - padding.bottom
@@ -36,13 +36,13 @@ export function MetricsChart() {
     .join(' ')
 
   return (
-    <div className="absolute bottom-20 right-4 bg-[#12121a]/90 backdrop-blur-md rounded-xl border border-white/10 p-3 z-10">
+    <div className="absolute bottom-20 right-4 bg-[#121212]/90 backdrop-blur-md rounded-xl border border-white/10 p-3 z-10">
       <div className="flex items-center gap-4 mb-2">
-        <span className="text-xs text-blue-400 flex items-center gap-1">
-          <span className="w-3 h-0.5 bg-blue-400 inline-block" /> Loss
+        <span className="text-xs text-amber-300 flex items-center gap-1">
+          <span className="w-3 h-0.5 bg-amber-300 inline-block" /> Loss
         </span>
-        <span className="text-xs text-green-400 flex items-center gap-1">
-          <span className="w-3 h-0.5 bg-green-400 inline-block" /> Accuracy
+        <span className="text-xs text-amber-500 flex items-center gap-1">
+          <span className="w-3 h-0.5 bg-amber-500 inline-block" /> Accuracy
         </span>
       </div>
       <svg width={width} height={height}>
@@ -62,7 +62,7 @@ export function MetricsChart() {
           <polyline
             points={lossPoints}
             fill="none"
-            stroke="#4A90D9"
+            stroke="#ffb429"
             strokeWidth={2}
           />
         )}
@@ -71,7 +71,7 @@ export function MetricsChart() {
           <polyline
             points={accPoints}
             fill="none"
-            stroke="#50E3C2"
+            stroke="#ffd27a"
             strokeWidth={2}
           />
         )}

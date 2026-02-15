@@ -4,6 +4,15 @@ from pydantic import BaseModel, Field, field_validator
 
 from .graph_schema import TrainingConfigIn
 
+_LOSS_ALIASES = {
+    "cross_entropy": "cross_entropy",
+    "crossentropy": "cross_entropy",
+    "ce": "cross_entropy",
+    "mse": "mse",
+    "mse_loss": "mse",
+    "mean_squared_error": "mse",
+}
+
 
 class TrainingConfig(BaseModel):
     dataset: str = "mnist"
@@ -26,7 +35,11 @@ class TrainingConfig(BaseModel):
     @field_validator("loss")
     @classmethod
     def normalize_loss(cls, value: str) -> str:
-        return value.strip().lower()
+        normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+        canonical = _LOSS_ALIASES.get(normalized)
+        if canonical is None:
+            raise ValueError("loss must be one of: cross_entropy, mse")
+        return canonical
 
     @field_validator("epochs")
     @classmethod

@@ -11,9 +11,18 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
 from core.graph_compiler import GraphCompileError, compile_graph
+from core.job_storage import (
+    NN_ARTIFACT_FILENAME,
+    load_job_metadata,
+    load_python_source,
+    model_job_dir,
+    persist_job_bundle,
+    update_job_metadata,
+)
 from core.job_registry import job_registry
 from core.shape_inference import validate_graph
 from core.training_engine import run_training_job
+from datasets.registry import get_dataset_meta
 from models.graph_schema import GraphSpec
 from models.training_config import normalize_training_config
 
@@ -30,6 +39,59 @@ class InferenceRequest(BaseModel):
     job_id: str
     inputs: Any
     return_probabilities: bool = True
+
+
+def _resolve_persisted_latest_job_id() -> str | None:
+    jobs_root = ARTIFACTS_DIR / "jobs"
+    if not jobs_root.exists():
+        return None
+
+    latest_job_id: str | None = None
+    latest_mtime = -1.0
+    for candidate in jobs_root.iterdir():
+        if not candidate.is_dir():
+            continue
+        try:
+            mtime = candidate.stat().st_mtime
+        except OSError:
+            continue
+        if mtime > latest_mtime:
+            latest_mtime = mtime
+            latest_job_id = candidate.name
+
+    return latest_job_id
+
+
+def _resolve_artifact_path(job_id: str, entry_artifact: Path | None) -> Path | None:
+    if entry_artifact is not None and entry_artifact.exists():
+        return entry_artifact
+
+    bundled = model_job_dir(ARTIFACTS_DIR, job_id) / NN_ARTIFACT_FILENAME
+    if bundled.exists():
+        return bundled
+
+    legacy = ARTIFACTS_DIR / f"{job_id}.pt"
+    if legacy.exists():
+        return legacy
+
+    return None
+
+
+def _status_from_metadata(job_id: str) -> dict[str, Any] | None:
+    job_dir = model_job_dir(ARTIFACTS_DIR, job_id)
+    metadata = load_job_metadata(job_dir)
+    if metadata is None:
+        return None
+
+    return {
+        "job_id": job_id,
+        "status": metadata.get("status"),
+        "terminal": bool(metadata.get("terminal")),
+        "error": metadata.get("error"),
+        "final_metrics": metadata.get("final_metrics"),
+        "has_python_source": bool(load_python_source(job_dir)),
+        "has_artifact": _resolve_artifact_path(job_id, None) is not None,
+    }
 
 
 def _extract_shapes_from_summary(summary: dict) -> tuple[list[int] | None, int | None]:
@@ -50,6 +112,41 @@ def _extract_shapes_from_summary(summary: dict) -> tuple[list[int] | None, int |
             ):
                 num_classes = int(output_shape[0])
     return input_shape, num_classes
+
+
+def _validate_dataset_contract(
+    dataset_id: str,
+    input_shape: list[int] | None,
+    num_classes: int | None,
+) -> list[dict[str, object]]:
+    errors: list[dict[str, object]] = []
+    meta = get_dataset_meta(dataset_id)
+    if meta is None:
+        return [{"message": f"Unsupported dataset for v1: {dataset_id}"}]
+
+    expected_input = meta.get("input_shape")
+    expected_classes = meta.get("num_classes")
+    dataset_name = str(meta.get("name", dataset_id))
+
+    if isinstance(expected_input, list) and input_shape != expected_input:
+        errors.append(
+            {
+                "message": f"{dataset_name} requires Input.shape={expected_input}",
+                "expected": expected_input,
+                "got": input_shape,
+            }
+        )
+
+    if isinstance(expected_classes, int) and num_classes != expected_classes:
+        errors.append(
+            {
+                "message": f"{dataset_name} requires Output.num_classes={expected_classes}",
+                "expected": expected_classes,
+                "got": num_classes,
+            }
+        )
+
+    return errors
 
 
 def _to_inference_tensor(raw_inputs: Any, expected_shape: list[int] | None) -> torch.Tensor:
@@ -124,7 +221,7 @@ async def compile_model(graph: GraphSpec):
 async def train_model(graph: GraphSpec):
     training = normalize_training_config(graph.training)
 
-    if training.dataset != "mnist":
+    if get_dataset_meta(training.dataset) is None:
         raise HTTPException(
             status_code=400,
             detail={"errors": [{"message": f"Unsupported dataset for v1: {training.dataset}"}]},
@@ -136,12 +233,32 @@ async def train_model(graph: GraphSpec):
         raise HTTPException(status_code=400, detail={"errors": exc.errors}) from exc
 
     input_shape, num_classes = _extract_shapes_from_summary(compiled.summary)
+    dataset_contract_errors = _validate_dataset_contract(training.dataset, input_shape, num_classes)
+    if dataset_contract_errors:
+        raise HTTPException(status_code=400, detail={"errors": dataset_contract_errors})
+
     entry = job_registry.create_job(
         compiled.python_source,
         model=compiled.model,
         input_shape=input_shape,
         num_classes=num_classes,
     )
+    job_dir = model_job_dir(ARTIFACTS_DIR, entry.job_id)
+    try:
+        persist_job_bundle(
+            job_dir,
+            model_family="nn",
+            python_source=compiled.python_source,
+            graph_payload=graph.model_dump(mode="json", by_alias=True, exclude_none=True),
+            training_payload=training.model_dump(mode="json"),
+            summary_payload=compiled.summary,
+            warnings=compiled.warnings,
+        )
+        job_registry.set_job_dir(entry.job_id, job_dir)
+    except OSError as exc:
+        await job_registry.mark_terminal(entry.job_id, "failed", error=f"Failed to persist job bundle: {exc}")
+        raise HTTPException(status_code=500, detail={"message": f"Failed to persist job bundle: {exc}"}) from exc
+
     task = asyncio.create_task(run_training_job(entry.job_id, compiled, training, ARTIFACTS_DIR))
     job_registry.set_task(entry.job_id, task)
 
@@ -162,6 +279,8 @@ async def stop_model(payload: StopRequest | None = Body(default=None)):
         raise HTTPException(status_code=404, detail={"message": f"Unknown job_id: {job_id}"})
 
     job_registry.request_stop(job_id)
+    if entry.job_dir is not None:
+        update_job_metadata(entry.job_dir, status=entry.status, terminal=False)
     return {"job_id": job_id, "status": entry.status}
 
 
@@ -169,7 +288,10 @@ async def stop_model(payload: StopRequest | None = Body(default=None)):
 async def status_model(job_id: str):
     entry = job_registry.get(job_id)
     if entry is None:
-        raise HTTPException(status_code=404, detail={"message": f"Unknown job_id: {job_id}"})
+        persisted = _status_from_metadata(job_id)
+        if persisted is None:
+            raise HTTPException(status_code=404, detail={"message": f"Unknown job_id: {job_id}"})
+        return persisted
 
     return {
         "job_id": entry.job_id,
@@ -177,14 +299,16 @@ async def status_model(job_id: str):
         "terminal": entry.terminal,
         "error": entry.error,
         "final_metrics": entry.final_metrics,
-        "has_python_source": bool(entry.python_source),
-        "has_artifact": bool(entry.artifact_path and entry.artifact_path.exists()),
+        "has_python_source": bool(entry.python_source or load_python_source(model_job_dir(ARTIFACTS_DIR, job_id))),
+        "has_artifact": _resolve_artifact_path(job_id, entry.artifact_path) is not None,
     }
 
 
 @router.get("/latest")
 async def latest_model_job():
     job_id = job_registry.latest_job_id()
+    if job_id is None:
+        job_id = _resolve_persisted_latest_job_id()
     if job_id is None:
         return {
             "job_id": None,
@@ -197,36 +321,41 @@ async def latest_model_job():
 
     entry = job_registry.get(job_id)
     if entry is None:
-        return {
-            "job_id": None,
-            "status": None,
-            "terminal": None,
-            "error": None,
-            "has_python_source": False,
-            "has_artifact": False,
-        }
+        persisted = _status_from_metadata(job_id)
+        if persisted is None:
+            return {
+                "job_id": None,
+                "status": None,
+                "terminal": None,
+                "error": None,
+                "has_python_source": False,
+                "has_artifact": False,
+            }
+        return persisted
 
     return {
         "job_id": entry.job_id,
         "status": entry.status,
         "terminal": entry.terminal,
         "error": entry.error,
-        "has_python_source": bool(entry.python_source),
-        "has_artifact": bool(entry.artifact_path and entry.artifact_path.exists()),
+        "has_python_source": bool(entry.python_source or load_python_source(model_job_dir(ARTIFACTS_DIR, job_id))),
+        "has_artifact": _resolve_artifact_path(job_id, entry.artifact_path) is not None,
     }
 
 
 @router.get("/export")
 async def export_model(job_id: str, format: Literal["py", "pt"] = "py"):
     entry = job_registry.get(job_id)
-    if entry is None:
-        raise HTTPException(status_code=404, detail={"message": f"Unknown job_id: {job_id}"})
+    job_dir = model_job_dir(ARTIFACTS_DIR, job_id)
 
     if format == "py":
-        return PlainTextResponse(entry.python_source, media_type="text/x-python")
+        source = entry.python_source if entry and entry.python_source else load_python_source(job_dir)
+        if not source:
+            raise HTTPException(status_code=404, detail={"message": f"Unknown job_id: {job_id}"})
+        return PlainTextResponse(source, media_type="text/x-python")
 
-    artifact_path = entry.artifact_path
-    if artifact_path is None or not artifact_path.exists():
+    artifact_path = _resolve_artifact_path(job_id, entry.artifact_path if entry else None)
+    if artifact_path is None:
         raise HTTPException(
             status_code=404,
             detail={"message": "No exported .pt artifact yet for this job"},

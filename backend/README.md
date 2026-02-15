@@ -1,6 +1,6 @@
 # MLCanvas Backend
 
-FastAPI backend that accepts graph JSON from the frontend, validates and compiles it into PyTorch, and runs async MNIST training jobs with websocket metric streaming.
+FastAPI backend that accepts graph JSON from the frontend, validates and compiles it into PyTorch, and runs async NN training jobs with websocket metric streaming.
 
 ## Run
 
@@ -58,18 +58,46 @@ Behavior:
 - `GET /api/model/status?job_id=<id>`
 - `POST /api/model/infer`
 - `GET /api/model/export?job_id=<id>&format=py|pt`
+- `POST /api/deploy` (create local deployment from a trained NN job)
+- `GET /api/deploy/list`
+- `GET /api/deploy/status?deployment_id=<id>`
+- `GET /api/deploy/logs?deployment_id=<id>&limit=<n>`
+- `POST /api/deploy/{deployment_id}/infer`
+- `POST /api/deploy/{deployment_id}/start`
+- `DELETE /api/deploy/{deployment_id}`
 - `GET /api/datasets`
 - `WS /ws/training/{job_id}`
+
+### Random Forest API
+
+- `POST /api/rf/validate`
+- `POST /api/rf/compile`
+- `POST /api/rf/train`
+- `POST /api/rf/stop`
+- `GET /api/rf/status?job_id=<id>`
+- `GET /api/rf/latest`
+- `POST /api/rf/infer`
+- `GET /api/rf/export?job_id=<id>&format=py|pkl`
+- `GET /api/rf/datasets`
+- `WS /ws/rf/training/{job_id}`
 
 ## Notes
 
 - v1 supports sequential graphs only.
 - Supported layers: `Input`, `Dense`, `Dropout`, `Flatten`, `Output`.
-- Dataset support is MNIST only in v1.
-- MNIST is downloaded from Kaggle dataset `oddrationale/mnist-in-csv`.
-- You must have the Kaggle CLI configured (`kaggle.json` credentials).
+- NN datasets:
+  - `mnist` (Kaggle: `oddrationale/mnist-in-csv`, requires Kaggle credentials)
+  - `digits` (scikit-learn built-in 8x8 digits dataset, no Kaggle auth required)
 - Training uses the train split and evaluates on the test split each epoch.
 - WebSocket `epoch_update` includes both train and test metrics (`train_*`, `test_*`).
+- RF datasets are Kaggle-backed (`iris`, `wine`, `breast_cancer`) and fail fast if Kaggle auth/download is unavailable.
+- Every train job is persisted to disk for later reuse:
+  - NN jobs: `/Users/yax/programming/burn/backend/artifacts/jobs/<job_id>/`
+  - RF jobs: `/Users/yax/programming/burn/backend/artifacts/rf/jobs/<job_id>/`
+  - Bundle files include `model.py`, `graph.json`, `training.json`, `summary.json`, `metadata.json`, and trained artifact (`model.pt` or `model.pkl`) when available.
+- Deployment Manager metadata/logs are persisted to:
+  - `/Users/yax/programming/burn/backend/artifacts/deployments/registry.json`
+  - After backend restart, deployments restore as `stopped` (runtime model objects are in-memory only) and can be restarted from `/deployments`.
 
 Kaggle setup quick check:
 

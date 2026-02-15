@@ -9,7 +9,11 @@ import { Connection } from './edges/Connection'
 import { ConnectionPreview } from './edges/ConnectionPreview'
 import { LayerNode3D } from './nodes/LayerNode'
 
-export function SceneManager() {
+interface SceneManagerProps {
+  lowDetailMode: boolean
+}
+
+export function SceneManager({ lowDetailMode }: SceneManagerProps) {
   const camera = useThree((s) => s.camera)
   const viewportSize = useThree((s) => s.size)
   const nodes = useGraphStore((s) => s.nodes)
@@ -91,6 +95,7 @@ export function SceneManager() {
             key={edge.id}
             sourceNode={sourceNode}
             targetNode={targetNode}
+            lowDetailMode={lowDetailMode}
           />
         )
       })}

@@ -36,16 +36,16 @@ export function LossSurfaceGraph({
         className="loss-surface-canvas"
         camera={{ position: [4.7, 3.5, 4.6], fov: 44 }}
       >
-        <color attach="background" args={['#191c21']} />
+        <color attach="background" args={['#121212']} />
         <ambientLight intensity={0.72} />
         <directionalLight position={[4, 7, 3]} intensity={0.72} />
-        <directionalLight position={[-3, 5, -4]} intensity={0.36} color="#8dd1ff" />
+        <directionalLight position={[-3, 5, -4]} intensity={0.36} color="#ffd27a" />
 
         {gridLines.map((points, index) => (
           <Line
             key={`surface-grid-${index}`}
             points={points}
-            color="#7ca4c8"
+            color="#9d7a3f"
             transparent
             opacity={0.35}
             lineWidth={1}
@@ -53,12 +53,12 @@ export function LossSurfaceGraph({
         ))}
 
         {pathPoints.length > 1 ? (
-          <Line points={pathPoints} color="#ff9a3c" lineWidth={2.2} />
+          <Line points={pathPoints} color="#ffb429" lineWidth={2.2} />
         ) : null}
 
         <mesh position={markerPoint.toArray()}>
           <sphereGeometry args={[0.09, 20, 20]} />
-          <meshStandardMaterial color="#7dd3fc" emissive="#2e9be6" emissiveIntensity={0.95} />
+          <meshStandardMaterial color="#ffd27a" emissive="#8a5a12" emissiveIntensity={0.95} />
         </mesh>
 
         <OrbitControls
